@@ -15,24 +15,24 @@ func InlineSharedFlows(bundle *APIProxyBundle, sharedFlows map[string]*SharedFlo
 	inlined := make(map[string]bool)
 
 	for _, proxy := range bundle.ProxyEndpoints {
-		inlineFlowSteps(proxy.PreFlow.RequestSteps, sharedFlows, inlined, bundle)
-		inlineFlowSteps(proxy.PreFlow.ResponseSteps, sharedFlows, inlined, bundle)
-		inlineFlowSteps(proxy.PostFlow.RequestSteps, sharedFlows, inlined, bundle)
-		inlineFlowSteps(proxy.PostFlow.ResponseSteps, sharedFlows, inlined, bundle)
-		inlineFlowSteps(proxy.PostClientFlow.RequestSteps, sharedFlows, inlined, bundle)
-		inlineFlowSteps(proxy.PostClientFlow.ResponseSteps, sharedFlows, inlined, bundle)
+		proxy.PreFlow.RequestSteps = inlineFlowSteps(proxy.PreFlow.RequestSteps, sharedFlows, inlined, bundle)
+		proxy.PreFlow.ResponseSteps = inlineFlowSteps(proxy.PreFlow.ResponseSteps, sharedFlows, inlined, bundle)
+		proxy.PostFlow.RequestSteps = inlineFlowSteps(proxy.PostFlow.RequestSteps, sharedFlows, inlined, bundle)
+		proxy.PostFlow.ResponseSteps = inlineFlowSteps(proxy.PostFlow.ResponseSteps, sharedFlows, inlined, bundle)
+		proxy.PostClientFlow.RequestSteps = inlineFlowSteps(proxy.PostClientFlow.RequestSteps, sharedFlows, inlined, bundle)
+		proxy.PostClientFlow.ResponseSteps = inlineFlowSteps(proxy.PostClientFlow.ResponseSteps, sharedFlows, inlined, bundle)
 
 		for _, flow := range proxy.ConditionalFlows {
-			inlineFlowSteps(flow.RequestSteps, sharedFlows, inlined, bundle)
-			inlineFlowSteps(flow.ResponseSteps, sharedFlows, inlined, bundle)
+			flow.RequestSteps = inlineFlowSteps(flow.RequestSteps, sharedFlows, inlined, bundle)
+			flow.ResponseSteps = inlineFlowSteps(flow.ResponseSteps, sharedFlows, inlined, bundle)
 		}
 	}
 
 	for _, target := range bundle.TargetEndpoints {
-		inlineFlowSteps(target.PreFlow.RequestSteps, sharedFlows, inlined, bundle)
-		inlineFlowSteps(target.PreFlow.ResponseSteps, sharedFlows, inlined, bundle)
-		inlineFlowSteps(target.PostFlow.RequestSteps, sharedFlows, inlined, bundle)
-		inlineFlowSteps(target.PostFlow.ResponseSteps, sharedFlows, inlined, bundle)
+		target.PreFlow.RequestSteps = inlineFlowSteps(target.PreFlow.RequestSteps, sharedFlows, inlined, bundle)
+		target.PreFlow.ResponseSteps = inlineFlowSteps(target.PreFlow.ResponseSteps, sharedFlows, inlined, bundle)
+		target.PostFlow.RequestSteps = inlineFlowSteps(target.PostFlow.RequestSteps, sharedFlows, inlined, bundle)
+		target.PostFlow.ResponseSteps = inlineFlowSteps(target.PostFlow.ResponseSteps, sharedFlows, inlined, bundle)
 	}
 
 	// Remove FlowCallout policies that were inlined
@@ -43,14 +43,18 @@ func InlineSharedFlows(bundle *APIProxyBundle, sharedFlows map[string]*SharedFlo
 }
 
 func inlineFlowSteps(steps []FlowStep, sharedFlows map[string]*SharedFlowBundle, inlined map[string]bool, bundle *APIProxyBundle) []FlowStep {
-	if len(steps) == 0 {
+	if steps == nil || len(steps) == 0 {
 		return steps
 	}
 
 	var result []FlowStep
 	for _, step := range steps {
 		policy, exists := bundle.PoliciesMap[step.PolicyName]
-		if !exists || policy.Type != PolicyTypeFlowCallout {
+		if !exists || policy == nil {
+			result = append(result, step)
+			continue
+		}
+		if policy.Type != PolicyTypeFlowCallout {
 			result = append(result, step)
 			continue
 		}
@@ -67,20 +71,15 @@ func inlineFlowSteps(steps []FlowStep, sharedFlows map[string]*SharedFlowBundle,
 			continue
 		}
 
-		// Mark this FlowCallout policy as inlined
 		inlined[step.PolicyName] = true
 
-		// Get the default shared flow definition
 		sfDef, ok := sfBundle.SharedFlows["default"]
 		if !ok {
 			result = append(result, step)
 			continue
 		}
 
-		// Inline the shared flow steps
 		for _, sfStep := range sfDef.RequestSteps {
-			// Merge conditions: if the original FlowCallout had a condition,
-			// AND it with the shared flow step's condition
 			condition := sfStep.Condition
 			if step.Condition != "" {
 				if condition != "" {
@@ -90,9 +89,7 @@ func inlineFlowSteps(steps []FlowStep, sharedFlows map[string]*SharedFlowBundle,
 				}
 			}
 
-			// Check for policy name collision - bundle takes precedence
 			if _, bundleHas := bundle.PoliciesMap[sfStep.PolicyName]; !bundleHas {
-				// Add shared flow policy to bundle if not already present
 				if sfPolicy, sfExists := sfBundle.PoliciesMap[sfStep.PolicyName]; sfExists {
 					bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
 				}

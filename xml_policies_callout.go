@@ -34,10 +34,14 @@ func (p *XMLParser) parseServiceCalloutPolicy(decoder *xml.Decoder, policyName s
 			switch elem.Name.Local {
 			case "Request":
 				for _, attr := range elem.Attr {
-					if attr.Name.Local == "clear" {
-						// Handle clear attribute
+					if attr.Name.Local == "variable" {
+						policy.ServiceCalloutRequest = attr.Value
 					}
 				}
+			case "Response":
+				// Will be handled in CharData
+			case "HTTPTargetConnection", "LocalTargetConnection":
+				decoder.Skip()
 			case "Set":
 				// Headers, Payload, Verb, etc.
 			case "HTTPHeader":
@@ -67,10 +71,6 @@ func (p *XMLParser) parseServiceCalloutPolicy(decoder *xml.Decoder, policyName s
 						policy.HTTPMethod = strings.ToUpper(strings.TrimSpace(string(char)))
 					}
 				}
-			case "Response":
-				// Response variable name
-			case "LocalTargetConnection":
-				// Internal callout target
 			case "HTTPURL":
 				if tok, err := decoder.Token(); err == nil {
 					if char, ok := tok.(xml.CharData); ok {
@@ -117,7 +117,7 @@ func (p *XMLParser) parseFlowCalloutPolicy(decoder *xml.Decoder, policyName stri
 			case "SharedFlowBundle":
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.SharedFlowBundle = txt
-					policy.Source = txt // Keep for backwards compatibility
+					policy.Source = txt
 				}
 			}
 		case xml.EndElement:

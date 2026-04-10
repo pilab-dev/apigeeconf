@@ -42,6 +42,38 @@ func (p *XMLParser) parseVerifyAPIKeyPolicy(decoder *xml.Decoder, policyName str
 func (p *XMLParser) parseOAuthV2Policy(decoder *xml.Decoder, policyName string) (*JavaScriptPolicy, *Policy, error) {
 	policy := &Policy{Type: PolicyTypeOAuthV2, Name: policyName, Properties: make(map[string]string)}
 	jsPolicy := &JavaScriptPolicy{Name: policyName, Properties: make(map[string]string), Includes: []string{}}
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+
+		switch elem := token.(type) {
+		case xml.StartElement:
+			switch elem.Name.Local {
+			case "Operation":
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.OAuthOperation = txt
+				}
+			case "GenerateResponse":
+				policy.OAuthGenerateResponse = true
+			case "AccessToken":
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.OAuthAccessTokenRef = txt
+				}
+			case "ExpiresIn":
+				if txt, err := p.readCharData(decoder); err == nil {
+					fmt.Sscanf(txt, "%d", &policy.OAuthExpiresIn)
+				}
+			}
+		case xml.EndElement:
+			if elem.Name.Local == "OAuthV2" {
+				return jsPolicy, policy, nil
+			}
+		}
+	}
+
 	return jsPolicy, policy, nil
 }
 

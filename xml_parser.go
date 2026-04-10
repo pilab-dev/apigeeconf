@@ -29,6 +29,7 @@ func (p *XMLParser) ParseBundle() (*APIProxyBundle, error) {
 	}
 
 	// Parse apiproxy.xml (or SAP.xml for some bundles)
+	// Also handles bundles like AgreementManagementAPI.xml, etc.
 	possibleFiles := []string{"apiproxy.xml", "SAP.xml", "APIProxy.xml"}
 	var apiproxyData []byte
 	for _, name := range possibleFiles {
@@ -36,6 +37,19 @@ func (p *XMLParser) ParseBundle() (*APIProxyBundle, error) {
 		if data, err := os.ReadFile(apiproxyXML); err == nil {
 			apiproxyData = data
 			break
+		}
+	}
+	// If no match, look for any XML file in basePath that looks like the proxy definition
+	if apiproxyData == nil {
+		if files, err := os.ReadDir(p.basePath); err == nil {
+			for _, f := range files {
+				if strings.HasSuffix(f.Name(), ".xml") {
+					if data, err := os.ReadFile(filepath.Join(p.basePath, f.Name())); err == nil {
+						apiproxyData = data
+						break
+					}
+				}
+			}
 		}
 	}
 	if apiproxyData != nil {
@@ -132,6 +146,79 @@ func (p *XMLParser) readCharData(decoder *xml.Decoder) (string, error) {
 			return "", nil
 		}
 	}
+}
+
+// ParseSharedFlowBundle parses a shared flow bundle (SharedFlowBundle format)
+func (p *XMLParser) ParseSharedFlowBundle() (*APIProxyBundle, error) {
+	bundle := &APIProxyBundle{
+		ProxyEndpoints:  make(map[string]*ProxyEndpoint),
+		TargetEndpoints: make(map[string]*TargetEndpoint),
+		Policies:        make(map[string]*JavaScriptPolicy),
+		PoliciesMap:     make(map[string]*Policy),
+		BasePath:        p.basePath,
+	}
+
+	// Find and parse sharedflowbundle.xml
+	var sfData []byte
+	sfFiles := []string{"sharedflowbundle.xml", "sharedflow.xml"}
+	for _, name := range sfFiles {
+		sfXML := filepath.Join(p.basePath, name)
+		if data, err := os.ReadFile(sfXML); err == nil {
+			sfData = data
+			break
+		}
+	}
+	// If no match, look for any XML file
+	if sfData == nil {
+		if files, err := os.ReadDir(p.basePath); err == nil {
+			for _, f := range files {
+				if strings.HasSuffix(f.Name(), ".xml") {
+					if data, err := os.ReadFile(filepath.Join(p.basePath, f.Name())); err == nil {
+						sfData = data
+						break
+					}
+				}
+			}
+		}
+	}
+
+	if sfData != nil {
+		var root struct {
+			XMLName     xml.Name `xml:"SharedFlowBundle"`
+			Name        string   `xml:"name,attr"`
+			Revision    string   `xml:"revision,attr"`
+			SharedFlows []struct {
+				Name string `xml:"name,attr"`
+			} `xml:"SharedFlows>SharedFlow"`
+			Policies []string `xml:"Policies>Policy"`
+		}
+		if err := xml.Unmarshal(sfData, &root); err == nil {
+			bundle.Name = root.Name
+			bundle.Revision = root.Revision
+		}
+		if bundle.Name == "" {
+			bundle.Name = filepath.Base(p.basePath)
+		}
+	}
+
+	// Parse policies
+	policiesDir := filepath.Join(p.basePath, "policies")
+	if files, err := os.ReadDir(policiesDir); err == nil {
+		for _, f := range files {
+			if strings.HasSuffix(f.Name(), ".xml") {
+				jsPolicy, genericPolicy, err := p.parsePolicyFile(filepath.Join(policiesDir, f.Name()))
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse policy %s: %w", f.Name(), err)
+				}
+				if jsPolicy != nil && genericPolicy != nil {
+					bundle.Policies[jsPolicy.Name] = jsPolicy
+					bundle.PoliciesMap[genericPolicy.Name] = genericPolicy
+				}
+			}
+		}
+	}
+
+	return bundle, nil
 }
 
 func (p *XMLParser) getAttributeValue(attrs []xml.Attr, name string) string {

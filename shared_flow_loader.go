@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // SharedFlowBundle represents a parsed Apigee shared flow bundle
@@ -55,7 +56,7 @@ func LoadAllSharedFlows(dirPath string) (map[string]*SharedFlowBundle, error) {
 
 func loadSingleSharedFlow(sfDir, name string) (*SharedFlowBundle, error) {
 	parser := NewXMLParser(sfDir)
-	bundle, err := parser.ParseBundle()
+	bundle, err := parser.ParseSharedFlowBundle()
 	if err != nil {
 		return nil, fmt.Errorf("failed to parse shared flow bundle: %w", err)
 	}
@@ -67,8 +68,13 @@ func loadSingleSharedFlow(sfDir, name string) (*SharedFlowBundle, error) {
 		PoliciesMap: bundle.PoliciesMap,
 	}
 
-	// Parse shared flow definitions from sharedflows/ directory
 	sfDirPath := filepath.Join(sfDir, "sharedflows")
+	if _, err := os.Stat(sfDirPath); err != nil {
+		sfDirPath = filepath.Join(sfDir, "sharedflowbundle", "sharedflows")
+		if _, err := os.Stat(sfDirPath); err != nil {
+			return sfBundle, nil
+		}
+	}
 	sfEntries, err := os.ReadDir(sfDirPath)
 	if err != nil {
 		return sfBundle, nil
@@ -79,9 +85,9 @@ func loadSingleSharedFlow(sfDir, name string) (*SharedFlowBundle, error) {
 			continue
 		}
 
-		sfPath := filepath.Join(sfDirPath, sfEntry.Name())
-		sfDef, err := parseSharedFlowDefinition(sfPath)
+		sfDef, err := parseSharedFlowDefinitionXML(filepath.Join(sfDirPath, sfEntry.Name()), name)
 		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to parse shared flow %s: %v\n", sfEntry.Name(), err)
 			continue
 		}
 
@@ -91,36 +97,59 @@ func loadSingleSharedFlow(sfDir, name string) (*SharedFlowBundle, error) {
 	return sfBundle, nil
 }
 
-// SharedFlowXML represents the raw XML structure of a shared flow definition
-type SharedFlowXML struct {
-	XMLName xml.Name `xml:"SharedFlow"`
-	Name    string   `xml:"name,attr"`
-	Steps   []struct {
-		Name      string `xml:"Name"`
-		Condition string `xml:"Condition"`
-	} `xml:"Step"`
-}
-
-func parseSharedFlowDefinition(path string) (*SharedFlowDefinition, error) {
+func parseSharedFlowDefinitionXML(path, flowName string) (*SharedFlowDefinition, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
 
-	var sfXML SharedFlowXML
-	if err := xml.Unmarshal(data, &sfXML); err != nil {
-		return nil, err
-	}
-
 	sfDef := &SharedFlowDefinition{
-		Name: sfXML.Name,
+		Name: flowName,
 	}
 
-	for _, step := range sfXML.Steps {
-		sfDef.RequestSteps = append(sfDef.RequestSteps, FlowStep{
-			PolicyName: step.Name,
-			Condition:  step.Condition,
-		})
+	decoder := xml.NewDecoder(strings.NewReader(string(data)))
+
+	var currentSide string
+
+	for {
+		token, err := decoder.Token()
+		if err != nil {
+			break
+		}
+
+		switch elem := token.(type) {
+		case xml.StartElement:
+			switch elem.Name.Local {
+			case "SharedFlow":
+				for _, attr := range elem.Attr {
+					if attr.Name.Local == "name" {
+						sfDef.Name = attr.Value
+					}
+				}
+			case "Request":
+				currentSide = "Request"
+			case "Response":
+				currentSide = "Response"
+			case "Step":
+				var stepName string
+				for _, attr := range elem.Attr {
+					if attr.Name.Local == "name" {
+						stepName = attr.Value
+					}
+				}
+				if stepName != "" {
+					if currentSide == "Request" {
+						sfDef.RequestSteps = append(sfDef.RequestSteps, FlowStep{PolicyName: stepName})
+					} else if currentSide == "Response" {
+						sfDef.ResponseSteps = append(sfDef.ResponseSteps, FlowStep{PolicyName: stepName})
+					}
+				}
+			}
+		case xml.EndElement:
+			if elem.Name.Local == "Request" || elem.Name.Local == "Response" {
+				currentSide = ""
+			}
+		}
 	}
 
 	return sfDef, nil
