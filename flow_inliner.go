@@ -6,33 +6,37 @@ import (
 
 // InlineSharedFlows replaces FlowCallout steps with actual shared flow steps
 // in all proxy endpoints of the given bundle.
-// If sharedFlows is empty or nil, no inlining is performed.
+// If sharedFlows is empty or nil, uses embedded shared flows from bundle.SharedFlows.
+// Priority: external sharedFlows parameter > bundle.SharedFlows (embedded)
 func InlineSharedFlows(bundle *APIProxyBundle, sharedFlows map[string]*SharedFlowBundle, inline bool) {
-	if !inline || len(sharedFlows) == 0 {
+	if !inline {
 		return
 	}
 
 	inlined := make(map[string]bool)
 
+	// Use external shared flows if provided, otherwise use embedded
+	useExternal := len(sharedFlows) > 0
+
 	for _, proxy := range bundle.ProxyEndpoints {
-		proxy.PreFlow.RequestSteps = inlineFlowSteps(proxy.PreFlow.RequestSteps, sharedFlows, inlined, bundle)
-		proxy.PreFlow.ResponseSteps = inlineFlowSteps(proxy.PreFlow.ResponseSteps, sharedFlows, inlined, bundle)
-		proxy.PostFlow.RequestSteps = inlineFlowSteps(proxy.PostFlow.RequestSteps, sharedFlows, inlined, bundle)
-		proxy.PostFlow.ResponseSteps = inlineFlowSteps(proxy.PostFlow.ResponseSteps, sharedFlows, inlined, bundle)
-		proxy.PostClientFlow.RequestSteps = inlineFlowSteps(proxy.PostClientFlow.RequestSteps, sharedFlows, inlined, bundle)
-		proxy.PostClientFlow.ResponseSteps = inlineFlowSteps(proxy.PostClientFlow.ResponseSteps, sharedFlows, inlined, bundle)
+		proxy.PreFlow.RequestSteps = inlineFlowSteps(proxy.PreFlow.RequestSteps, sharedFlows, inlined, bundle, useExternal)
+		proxy.PreFlow.ResponseSteps = inlineFlowSteps(proxy.PreFlow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
+		proxy.PostFlow.RequestSteps = inlineFlowSteps(proxy.PostFlow.RequestSteps, sharedFlows, inlined, bundle, useExternal)
+		proxy.PostFlow.ResponseSteps = inlineFlowSteps(proxy.PostFlow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
+		proxy.PostClientFlow.RequestSteps = inlineFlowSteps(proxy.PostClientFlow.RequestSteps, sharedFlows, inlined, bundle, useExternal)
+		proxy.PostClientFlow.ResponseSteps = inlineFlowSteps(proxy.PostClientFlow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
 
 		for _, flow := range proxy.ConditionalFlows {
-			flow.RequestSteps = inlineFlowSteps(flow.RequestSteps, sharedFlows, inlined, bundle)
-			flow.ResponseSteps = inlineFlowSteps(flow.ResponseSteps, sharedFlows, inlined, bundle)
+			flow.RequestSteps = inlineFlowSteps(flow.RequestSteps, sharedFlows, inlined, bundle, useExternal)
+			flow.ResponseSteps = inlineFlowSteps(flow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
 		}
 	}
 
 	for _, target := range bundle.TargetEndpoints {
-		target.PreFlow.RequestSteps = inlineFlowSteps(target.PreFlow.RequestSteps, sharedFlows, inlined, bundle)
-		target.PreFlow.ResponseSteps = inlineFlowSteps(target.PreFlow.ResponseSteps, sharedFlows, inlined, bundle)
-		target.PostFlow.RequestSteps = inlineFlowSteps(target.PostFlow.RequestSteps, sharedFlows, inlined, bundle)
-		target.PostFlow.ResponseSteps = inlineFlowSteps(target.PostFlow.ResponseSteps, sharedFlows, inlined, bundle)
+		target.PreFlow.RequestSteps = inlineFlowSteps(target.PreFlow.RequestSteps, sharedFlows, inlined, bundle, useExternal)
+		target.PreFlow.ResponseSteps = inlineFlowSteps(target.PreFlow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
+		target.PostFlow.RequestSteps = inlineFlowSteps(target.PostFlow.RequestSteps, sharedFlows, inlined, bundle, useExternal)
+		target.PostFlow.ResponseSteps = inlineFlowSteps(target.PostFlow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
 	}
 
 	// Remove FlowCallout policies that were inlined
@@ -46,7 +50,7 @@ func InlineSharedFlows(bundle *APIProxyBundle, sharedFlows map[string]*SharedFlo
 	}
 }
 
-func inlineFlowSteps(steps []FlowStep, sharedFlows map[string]*SharedFlowBundle, inlined map[string]bool, bundle *APIProxyBundle) []FlowStep {
+func inlineFlowSteps(steps []FlowStep, externalSharedFlows map[string]*SharedFlowBundle, inlined map[string]bool, bundle *APIProxyBundle, useExternal bool) []FlowStep {
 	if steps == nil || len(steps) == 0 {
 		return steps
 	}
@@ -69,19 +73,28 @@ func inlineFlowSteps(steps []FlowStep, sharedFlows map[string]*SharedFlowBundle,
 			continue
 		}
 
-		sfBundle, ok := sharedFlows[sfName]
-		if !ok {
+		var sfDef *SharedFlowDefinition
+		var sfPolicies map[string]*Policy
+
+		// Try embedded first, then external
+		if !useExternal {
+			if embedded, ok := bundle.SharedFlows[sfName]; ok {
+				sfDef = embedded
+				sfPolicies = bundle.PoliciesMap // Use bundle's policies
+			}
+		} else {
+			if sfBundle, ok := externalSharedFlows[sfName]; ok {
+				sfDef, _ = sfBundle.SharedFlows["default"]
+				sfPolicies = sfBundle.PoliciesMap
+			}
+		}
+
+		if sfDef == nil {
 			result = append(result, step)
 			continue
 		}
 
 		inlined[step.PolicyName] = true
-
-		sfDef, ok := sfBundle.SharedFlows["default"]
-		if !ok {
-			result = append(result, step)
-			continue
-		}
 
 		for _, sfStep := range sfDef.RequestSteps {
 			condition := sfStep.Condition
@@ -95,12 +108,16 @@ func inlineFlowSteps(steps []FlowStep, sharedFlows map[string]*SharedFlowBundle,
 
 			existingPolicy, existingInBundle := bundle.PoliciesMap[sfStep.PolicyName]
 			if !existingInBundle {
-				if sfPolicy, sfExists := sfBundle.PoliciesMap[sfStep.PolicyName]; sfExists {
-					bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+				if sfPolicies != nil {
+					if sfPolicy, sfExists := sfPolicies[sfStep.PolicyName]; sfExists {
+						bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+					}
 				}
 			} else if existingInBundle && existingPolicy.Type == PolicyTypeFlowCallout {
-				if sfPolicy, sfExists := sfBundle.PoliciesMap[sfStep.PolicyName]; sfExists {
-					bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+				if sfPolicies != nil {
+					if sfPolicy, sfExists := sfPolicies[sfStep.PolicyName]; sfExists {
+						bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+					}
 				}
 			}
 
@@ -122,12 +139,16 @@ func inlineFlowSteps(steps []FlowStep, sharedFlows map[string]*SharedFlowBundle,
 
 			existingPolicy, existingInBundle := bundle.PoliciesMap[sfStep.PolicyName]
 			if !existingInBundle {
-				if sfPolicy, sfExists := sfBundle.PoliciesMap[sfStep.PolicyName]; sfExists {
-					bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+				if sfPolicies != nil {
+					if sfPolicy, sfExists := sfPolicies[sfStep.PolicyName]; sfExists {
+						bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+					}
 				}
 			} else if existingInBundle && existingPolicy.Type == PolicyTypeFlowCallout {
-				if sfPolicy, sfExists := sfBundle.PoliciesMap[sfStep.PolicyName]; sfExists {
-					bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+				if sfPolicies != nil {
+					if sfPolicy, sfExists := sfPolicies[sfStep.PolicyName]; sfExists {
+						bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+					}
 				}
 			}
 

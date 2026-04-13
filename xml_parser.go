@@ -111,6 +111,23 @@ func (p *XMLParser) ParseBundle() (*APIProxyBundle, error) {
 		}
 	}
 
+	// Parse embedded shared flows (bundled with proxy)
+	sharedFlowsDir := filepath.Join(p.basePath, "sharedflows")
+	if files, err := os.ReadDir(sharedFlowsDir); err == nil {
+		bundle.SharedFlows = make(map[string]*SharedFlowDefinition)
+		for _, f := range files {
+			if strings.HasSuffix(f.Name(), ".xml") {
+				sfDef, err := p.parseSharedFlowFile(filepath.Join(sharedFlowsDir, f.Name()))
+				if err != nil {
+					return nil, fmt.Errorf("failed to parse shared flow %s: %w", f.Name(), err)
+				}
+				if sfDef != nil {
+					bundle.SharedFlows[sfDef.Name] = sfDef
+				}
+			}
+		}
+	}
+
 	return bundle, nil
 }
 
@@ -146,6 +163,12 @@ func (p *XMLParser) readCharData(decoder *xml.Decoder) (string, error) {
 			return "", nil
 		}
 	}
+}
+
+// parseSharedFlowFile parses a shared flow XML file and returns SharedFlowDefinition
+func (p *XMLParser) parseSharedFlowFile(path string) (*SharedFlowDefinition, error) {
+	flowName := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	return parseSharedFlowDefinitionXML(path, flowName)
 }
 
 // ParseSharedFlowBundle parses a shared flow bundle (SharedFlowBundle format)

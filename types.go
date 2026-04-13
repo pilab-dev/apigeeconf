@@ -625,7 +625,8 @@ type APIProxyBundle struct {
 	PoliciesMap     map[string]*Policy // All policies including AssignMessage, ExtractVariables, etc.
 	BasePath        string
 	Manifest        BundleManifest
-	Spec            string // OpenAPI spec URL or path
+	Spec            string                           // OpenAPI spec URL or path
+	SharedFlows     map[string]*SharedFlowDefinition // Embedded shared flows (bundled with proxy)
 }
 
 // RouteHandler maps route to execution config
