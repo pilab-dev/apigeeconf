@@ -36,9 +36,13 @@ func InlineSharedFlows(bundle *APIProxyBundle, sharedFlows map[string]*SharedFlo
 	}
 
 	// Remove FlowCallout policies that were inlined
+	// BUT only if they weren't replaced by actual policies from shared flows
 	for policyName := range inlined {
-		delete(bundle.PoliciesMap, policyName)
-		delete(bundle.Policies, policyName)
+		// Check if there's a non-FlowCallout policy with this name (replaced by shared flow)
+		if p, exists := bundle.PoliciesMap[policyName]; exists && p.Type == PolicyTypeFlowCallout {
+			delete(bundle.PoliciesMap, policyName)
+			delete(bundle.Policies, policyName)
+		}
 	}
 }
 
@@ -89,7 +93,39 @@ func inlineFlowSteps(steps []FlowStep, sharedFlows map[string]*SharedFlowBundle,
 				}
 			}
 
-			if _, bundleHas := bundle.PoliciesMap[sfStep.PolicyName]; !bundleHas {
+			existingPolicy, existingInBundle := bundle.PoliciesMap[sfStep.PolicyName]
+			if !existingInBundle {
+				if sfPolicy, sfExists := sfBundle.PoliciesMap[sfStep.PolicyName]; sfExists {
+					bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+				}
+			} else if existingInBundle && existingPolicy.Type == PolicyTypeFlowCallout {
+				if sfPolicy, sfExists := sfBundle.PoliciesMap[sfStep.PolicyName]; sfExists {
+					bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+				}
+			}
+
+			result = append(result, FlowStep{
+				PolicyName: sfStep.PolicyName,
+				Condition:  condition,
+			})
+		}
+
+		for _, sfStep := range sfDef.ResponseSteps {
+			condition := sfStep.Condition
+			if step.Condition != "" {
+				if condition != "" {
+					condition = fmt.Sprintf("(%s) AND (%s)", step.Condition, condition)
+				} else {
+					condition = step.Condition
+				}
+			}
+
+			existingPolicy, existingInBundle := bundle.PoliciesMap[sfStep.PolicyName]
+			if !existingInBundle {
+				if sfPolicy, sfExists := sfBundle.PoliciesMap[sfStep.PolicyName]; sfExists {
+					bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
+				}
+			} else if existingInBundle && existingPolicy.Type == PolicyTypeFlowCallout {
 				if sfPolicy, sfExists := sfBundle.PoliciesMap[sfStep.PolicyName]; sfExists {
 					bundle.PoliciesMap[sfStep.PolicyName] = sfPolicy
 				}

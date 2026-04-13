@@ -142,6 +142,25 @@ func parseSharedFlowDefinitionXML(path, flowName string) (*SharedFlowDefinition,
 						sfDef.RequestSteps = append(sfDef.RequestSteps, FlowStep{PolicyName: stepName})
 					} else if currentSide == "Response" {
 						sfDef.ResponseSteps = append(sfDef.ResponseSteps, FlowStep{PolicyName: stepName})
+					} else if currentSide == "" {
+						sfDef.RequestSteps = append(sfDef.RequestSteps, FlowStep{PolicyName: stepName})
+					}
+				}
+			case "Name":
+				if currentSide != "" || currentSide == "" {
+					if tok, err := decoder.Token(); err == nil {
+						if char, ok := tok.(xml.CharData); ok {
+							stepName := strings.TrimSpace(string(char))
+							if stepName != "" {
+								if currentSide == "Request" {
+									sfDef.RequestSteps = append(sfDef.RequestSteps, FlowStep{PolicyName: stepName})
+								} else if currentSide == "Response" {
+									sfDef.ResponseSteps = append(sfDef.ResponseSteps, FlowStep{PolicyName: stepName})
+								} else if currentSide == "" {
+									sfDef.RequestSteps = append(sfDef.RequestSteps, FlowStep{PolicyName: stepName})
+								}
+							}
+						}
 					}
 				}
 			}
