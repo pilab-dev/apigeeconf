@@ -145,6 +145,7 @@ func (p *XMLParser) parseTargetEndpointFile(path string) (*TargetEndpoint, error
 							fmt.Sscanf(attr.Value, "%d", &currentLBServer.Weight)
 						}
 					}
+					target.LoadBalancer.Server = append(target.LoadBalancer.Server, currentLBServer)
 				}
 			case "MaxFailures":
 				if inLoadBalancer {
