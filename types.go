@@ -331,6 +331,7 @@ type KVMOperation struct {
 	Value     string
 	KeyRef    string
 	ValueRef  string
+	AssignTo  string
 }
 
 // SyslogConfig represents syslog logging configuration
@@ -379,7 +380,7 @@ type CacheInvalidateConfig struct {
 // VariableConfig represents a variable extraction configuration
 type VariableConfig struct {
 	Name           string
-	Type           string // JSON, XML, FormParam, Header, QueryParam, URIPath
+	Type           string // JSON, XML, FormParam, Header, QueryParam, URIPath, Variable
 	Pattern        string // For JSON path, XPath, or regex pattern
 	JSONPath       string
 	XPath          string
@@ -388,6 +389,7 @@ type VariableConfig struct {
 	HeaderName     string // For Header
 	QueryParamName string // For QueryParam
 	FormParamName  string // For FormParam
+	Source         string // For Variable element
 }
 
 // ServiceCalloutConfig represents service callout configuration
@@ -433,8 +435,9 @@ type JavaScriptPolicy struct {
 
 // FlowStep represents a step in a flow
 type FlowStep struct {
-	PolicyName string
-	Condition  string
+	PolicyName      string
+	Condition       string
+	ContinueOnError bool // If true, pipeline continues even if this policy fails
 }
 
 // FlowPhase represents a flow phase configuration
@@ -594,6 +597,8 @@ type TargetEndpoint struct {
 	Name             string
 	PreFlow          FlowPhaseConfig
 	PostFlow         FlowPhaseConfig
+	ConditionalFlows []ConditionalFlow
+	Flows            []ConditionalFlow // Alias for ConditionalFlows for compatibility
 	URL              string
 	Properties       map[string]string
 	SSLInfo          SSLInfo

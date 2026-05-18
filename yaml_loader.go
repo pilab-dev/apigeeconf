@@ -416,6 +416,7 @@ type yamlKVMOp struct {
 	Value     string `yaml:"value,omitempty"`
 	KeyRef    string `yaml:"key_ref,omitempty"`
 	ValueRef  string `yaml:"value_ref,omitempty"`
+	AssignTo  string `yaml:"assign_to,omitempty"`
 }
 
 type yamlMessageLogging struct {
@@ -1155,6 +1156,7 @@ func (l *YAMLLoader) parsePolicy(name string, yp *yamlPolicy) (*JavaScriptPolicy
 					Operation: op.Operation,
 					Key:       op.Key,
 					Value:     op.Value,
+					AssignTo:  op.AssignTo,
 				}
 				if op.KeyRef != "" {
 					policy.KVMGetKeyRef = op.KeyRef

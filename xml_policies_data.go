@@ -70,7 +70,7 @@ func (p *XMLParser) parseKVMOperation(decoder *xml.Decoder, opType string, attrs
 	}
 
 	if opType == "Get" {
-		policy.KVMAssignTo = p.getAttributeValue(attrs, "assignTo")
+		op.AssignTo = p.getAttributeValue(attrs, "assignTo")
 		policy.KVMIndex = p.getAttributeValue(attrs, "index")
 	}
 
