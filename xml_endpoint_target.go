@@ -15,25 +15,13 @@ func (p *XMLParser) parseTargetEndpointFile(path string) (*TargetEndpoint, error
 	}
 
 	target := &TargetEndpoint{
-		Properties: make(map[string]string),
+		Properties:       make(map[string]string),
+		ConditionalFlows: []ConditionalFlow{},
+		PreFlow:          FlowPhaseConfig{RequestSteps: []FlowStep{}, ResponseSteps: []FlowStep{}},
+		PostFlow:         FlowPhaseConfig{RequestSteps: []FlowStep{}, ResponseSteps: []FlowStep{}},
 	}
 
 	decoder := xml.NewDecoder(strings.NewReader(string(data)))
-
-	var currentFlow string
-	var currentSide string
-	var inHTTPTargetConn bool
-	var inSSLInfo bool
-	var inLoadBalancer bool
-	var inHealthMonitor bool
-	var inHTTPMonitor bool
-	var inLocalTargetConn bool
-	var inScriptTarget bool
-	var inFaultRules bool
-	var inDefaultFaultRule bool
-	var currentFaultRule *FaultRule
-	var currentDefaultFaultRule *DefaultFaultRule
-	var currentLBServer LoadBalancerServer
 
 	for {
 		token, err := decoder.Token()
@@ -43,334 +31,267 @@ func (p *XMLParser) parseTargetEndpointFile(path string) (*TargetEndpoint, error
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "TargetEndpoint":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "name" {
-						target.Name = attr.Value
-					}
-				}
-			case "PreFlow":
-				currentFlow = "PreFlow"
-			case "PostFlow":
-				currentFlow = "PostFlow"
-			case "Flows":
-				currentFlow = "Flows"
-			case "Flow":
-				currentFlow = "Flow"
-			case "Request":
-				currentSide = "Request"
-			case "Response":
-				currentSide = "Response"
-			case "HTTPTargetConnection":
-				inHTTPTargetConn = true
-				currentFlow = "HTTPTargetConnection"
-			case "URL":
-				if inHTTPTargetConn {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.URL = strings.TrimSpace(string(char))
-						}
-					}
-				}
-			case "SSLInfo":
-				inSSLInfo = true
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "enabled" {
-						target.SSLInfo.Enabled = strings.ToLower(attr.Value) == "true"
-					}
-				}
-			case "Enabled":
-				if inSSLInfo {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.SSLInfo.Enabled = strings.ToLower(strings.TrimSpace(string(char))) == "true"
-						}
-					}
-				}
-			case "ClientAuthEnabled":
-				if inSSLInfo {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.SSLInfo.ClientAuthEnabled = strings.ToLower(strings.TrimSpace(string(char))) == "true"
-						}
-					}
-				}
-			case "Keystore":
-				if inSSLInfo {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.SSLInfo.Keystore = strings.TrimSpace(string(char))
-						}
-					}
-				}
-			case "Truststore":
-				if inSSLInfo {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.SSLInfo.Truststore = strings.TrimSpace(string(char))
-						}
-					}
-				}
-			case "IgnoreValidationErrors":
-				if inSSLInfo {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.SSLInfo.IgnoreValidationErrors = strings.ToLower(strings.TrimSpace(string(char))) == "true"
-						}
-					}
-				}
-			case "CommonName":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "wildcardMatch" {
-						target.SSLInfo.CommonName.WildcardMatch = strings.ToLower(attr.Value) == "true"
-					}
-				}
-			case "LoadBalancer":
-				inLoadBalancer = true
-				target.LoadBalancer = &LoadBalancer{}
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "algorithm" {
-						target.LoadBalancer.Algorithm = attr.Value
-					}
-				}
-			case "Server":
-				if inLoadBalancer {
-					currentLBServer = LoadBalancerServer{}
-					for _, attr := range elem.Attr {
-						if attr.Name.Local == "name" {
-							currentLBServer.Name = attr.Value
-						}
-						if attr.Name.Local == "weight" {
-							fmt.Sscanf(attr.Value, "%d", &currentLBServer.Weight)
-						}
-					}
-					target.LoadBalancer.Server = append(target.LoadBalancer.Server, currentLBServer)
-				}
-			case "MaxFailures":
-				if inLoadBalancer {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							fmt.Sscanf(strings.TrimSpace(string(char)), "%d", &target.LoadBalancer.MaxFailures)
-						}
-					}
-				}
-			case "IsFallback":
-				if inLoadBalancer {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							currentLBServer.IsFallback = strings.ToLower(strings.TrimSpace(string(char))) == "true"
-						}
-					}
-				}
-			case "PathSuffix":
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						target.PathSuffix = strings.TrimSpace(string(char))
-					}
-				}
-			case "Connection":
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						target.Connection = strings.TrimSpace(string(char))
-					}
-				}
-			case "HealthMonitor":
-				inHealthMonitor = true
-				target.HealthMonitor = &HealthMonitor{}
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "isEnabled" {
-						target.HealthMonitor.IsEnabled = strings.ToLower(attr.Value) == "true"
-					}
-				}
-			case "IntervalInSec":
-				if inHealthMonitor {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							fmt.Sscanf(strings.TrimSpace(string(char)), "%d", &target.HealthMonitor.IntervalInSec)
-						}
-					}
-				}
-			case "HTTPMonitor":
-				inHTTPMonitor = true
-				target.HealthMonitor.HTTPMonitor = &HTTPMonitor{}
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "port" {
-						fmt.Sscanf(attr.Value, "%d", &target.HealthMonitor.HTTPMonitor.Port)
-					}
-				}
-			case "ConnectTimeoutInSec":
-				if inHTTPMonitor {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							fmt.Sscanf(strings.TrimSpace(string(char)), "%d", &target.HealthMonitor.HTTPMonitor.Request.ConnectTimeoutInSec)
-						}
-					}
-				}
-			case "SocketReadTimeoutInSec":
-				if inHTTPMonitor {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							fmt.Sscanf(strings.TrimSpace(string(char)), "%d", &target.HealthMonitor.HTTPMonitor.Request.SocketReadTimeoutInSec)
-						}
-					}
-				}
-			case "PayloadLimitInKB":
-				if inHTTPMonitor {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							fmt.Sscanf(strings.TrimSpace(string(char)), "%d", &target.HealthMonitor.HTTPMonitor.Request.PayloadLimitInKB)
-						}
-					}
-				}
-			case "Verb":
-				if inHTTPMonitor {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.HealthMonitor.HTTPMonitor.Request.Verb = strings.TrimSpace(string(char))
-						}
-					}
-				}
-			case "LocalTargetConnection":
-				inLocalTargetConn = true
-			case "APIProxy":
-				if inLocalTargetConn {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.LocalTargetConn.APIProxy = strings.TrimSpace(string(char))
-						}
-					}
-				}
-			case "ProxyEndpoint":
-				if inLocalTargetConn {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.LocalTargetConn.ProxyEndpoint = strings.TrimSpace(string(char))
-						}
-					}
-				}
-			case "ScriptTarget":
-				inScriptTarget = true
-			case "ResourceURL":
-				if inScriptTarget {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							target.ScriptTarget.ResourceURL = strings.TrimSpace(string(char))
-						}
-					}
-				}
-			case "Step":
-				step := FlowStep{}
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "Name" {
-						step.PolicyName = attr.Value
-					}
-				}
-				if step.PolicyName == "" {
-					for {
-						tok, err := decoder.Token()
-						if err != nil {
-							break
-						}
-						if start, ok := tok.(xml.StartElement); ok && start.Name.Local == "Name" {
-							if tok2, err := decoder.Token(); err == nil {
-								if char, ok := tok2.(xml.CharData); ok {
-									step.PolicyName = strings.TrimSpace(string(char))
-								}
-							}
-						}
-						if end, ok := tok.(xml.EndElement); ok && end.Name.Local == "Step" {
-							break
-						}
-					}
-				}
-				if currentFlow == "PreFlow" {
-					if currentSide == "Request" {
-						target.PreFlow.RequestSteps = append(target.PreFlow.RequestSteps, step)
-					} else {
-						target.PreFlow.ResponseSteps = append(target.PreFlow.ResponseSteps, step)
-					}
-				} else if currentFlow == "PostFlow" {
-					if currentSide == "Request" {
-						target.PostFlow.RequestSteps = append(target.PostFlow.RequestSteps, step)
-					} else {
-						target.PostFlow.ResponseSteps = append(target.PostFlow.ResponseSteps, step)
-					}
-				} else if inFaultRules && currentFaultRule != nil {
-					currentFaultRule.Steps = append(currentFaultRule.Steps, step)
-				} else if inDefaultFaultRule && currentDefaultFaultRule != nil {
-					currentDefaultFaultRule.Steps = append(currentDefaultFaultRule.Steps, step)
-				}
-			case "Property":
-				var propName, propValue string
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "name" {
-						propName = attr.Value
-					}
-				}
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						propValue = strings.TrimSpace(string(char))
-					}
-				}
-				if propName != "" {
-					target.Properties[propName] = propValue
-				}
-			case "FaultRules":
-				inFaultRules = true
-			case "FaultRule":
-				if inFaultRules {
-					fr := FaultRule{}
-					for _, attr := range elem.Attr {
-						if attr.Name.Local == "name" {
-							fr.Name = attr.Value
-						}
-					}
-					target.FaultRules = append(target.FaultRules, fr)
-					currentFaultRule = &target.FaultRules[len(target.FaultRules)-1]
-				}
-			case "DefaultFaultRule":
-				inDefaultFaultRule = true
-				target.DefaultFaultRule = &DefaultFaultRule{}
-				currentDefaultFaultRule = target.DefaultFaultRule
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "alwaysEnforce" {
-						target.DefaultFaultRule.AlwaysEnforce = strings.ToLower(attr.Value) == "true"
-					}
-				}
-			}
-		case xml.CharData:
-			// Handle CharData for elements like Server name inside LoadBalancer
-		case xml.EndElement:
-			switch elem.Name.Local {
-			case "PreFlow", "PostFlow", "Flows":
-				currentFlow = ""
-			case "HTTPTargetConnection":
-				inHTTPTargetConn = false
-				currentFlow = ""
-			case "SSLInfo":
-				inSSLInfo = false
-			case "LoadBalancer":
-				inLoadBalancer = false
-			case "HealthMonitor":
-				inHealthMonitor = false
-			case "HTTPMonitor":
-				inHTTPMonitor = false
-			case "LocalTargetConnection":
-				inLocalTargetConn = false
-			case "ScriptTarget":
-				inScriptTarget = false
-			case "FaultRules":
-				inFaultRules = false
-				currentFaultRule = nil
-			case "FaultRule":
-				currentFaultRule = nil
-			case "DefaultFaultRule":
-				inDefaultFaultRule = false
-				currentDefaultFaultRule = nil
+			switch {
+			case strings.EqualFold(elem.Name.Local, "TargetEndpoint"):
+				target.Name = p.getAttributeValue(elem.Attr, "name")
+			case strings.EqualFold(elem.Name.Local, "PreFlow"):
+				target.PreFlow = p.parseFlowPhaseConfig(decoder, elem.Name.Local)
+			case strings.EqualFold(elem.Name.Local, "PostFlow"):
+				target.PostFlow = p.parseFlowPhaseConfig(decoder, elem.Name.Local)
+			case strings.EqualFold(elem.Name.Local, "Flows"):
+				// Continue parsing children (Flow elements)
+			case strings.EqualFold(elem.Name.Local, "Flow"):
+				target.ConditionalFlows = append(target.ConditionalFlows, p.parseConditionalFlow(decoder, elem))
+			case strings.EqualFold(elem.Name.Local, "HTTPTargetConnection"):
+				p.parseHTTPTargetConnection(decoder, target)
+			case strings.EqualFold(elem.Name.Local, "LocalTargetConnection"):
+				p.parseLocalTargetConnection(decoder, target)
+			case strings.EqualFold(elem.Name.Local, "ScriptTarget"):
+				p.parseScriptTarget(decoder, target)
+			case strings.EqualFold(elem.Name.Local, "FaultRules"):
+				// Continue parsing children
+			case strings.EqualFold(elem.Name.Local, "FaultRule"):
+				target.FaultRules = append(target.FaultRules, p.parseFaultRule(decoder, elem))
+			case strings.EqualFold(elem.Name.Local, "DefaultFaultRule"):
+				dfr := p.parseDefaultFaultRule(decoder, elem)
+				target.DefaultFaultRule = &dfr
 			}
 		}
 	}
 
 	return target, nil
+}
+
+func (p *XMLParser) parseHTTPTargetConnection(decoder *xml.Decoder, target *TargetEndpoint) {
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "URL"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.URL = txt
+				}
+			case strings.EqualFold(t.Name.Local, "SSLInfo"):
+				p.parseSSLInfo(decoder, t, target)
+			case strings.EqualFold(t.Name.Local, "LoadBalancer"):
+				p.parseLoadBalancer(decoder, t, target)
+			case strings.EqualFold(t.Name.Local, "HealthMonitor"):
+				p.parseHealthMonitor(decoder, t, target)
+			case strings.EqualFold(t.Name.Local, "Properties"):
+				p.parseProperties(decoder, target.Properties)
+			case strings.EqualFold(t.Name.Local, "PathSuffix") || strings.EqualFold(t.Name.Local, "Path"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.PathSuffix = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Connection"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.Connection = txt
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "HTTPTargetConnection") {
+				return
+			}
+		}
+	}
+}
+
+func (p *XMLParser) parseSSLInfo(decoder *xml.Decoder, start xml.StartElement, target *TargetEndpoint) {
+	target.SSLInfo.Enabled = strings.ToLower(p.getAttributeValue(start.Attr, "enabled")) == "true"
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Enabled"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.SSLInfo.Enabled = strings.ToLower(txt) == "true"
+				}
+			case strings.EqualFold(t.Name.Local, "ClientAuthEnabled"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.SSLInfo.ClientAuthEnabled = strings.ToLower(txt) == "true"
+				}
+			case strings.EqualFold(t.Name.Local, "Keystore"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.SSLInfo.Keystore = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Truststore"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.SSLInfo.Truststore = txt
+				}
+			case strings.EqualFold(t.Name.Local, "IgnoreValidationErrors"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.SSLInfo.IgnoreValidationErrors = strings.ToLower(txt) == "true"
+				}
+			case strings.EqualFold(t.Name.Local, "CommonName"):
+				target.SSLInfo.CommonName.WildcardMatch = strings.ToLower(p.getAttributeValue(t.Attr, "wildcardMatch")) == "true"
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.SSLInfo.CommonName.Value = txt
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "SSLInfo") {
+				return
+			}
+		}
+	}
+}
+
+func (p *XMLParser) parseLoadBalancer(decoder *xml.Decoder, start xml.StartElement, target *TargetEndpoint) {
+	target.LoadBalancer = &LoadBalancer{
+		Algorithm: p.getAttributeValue(start.Attr, "algorithm"),
+		Server:    []LoadBalancerServer{},
+	}
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Server"):
+				server := LoadBalancerServer{
+					Name: p.getAttributeValue(t.Attr, "name"),
+				}
+				if weight := p.getAttributeValue(t.Attr, "weight"); weight != "" {
+					fmt.Sscanf(weight, "%d", &server.Weight)
+				}
+				target.LoadBalancer.Server = append(target.LoadBalancer.Server, server)
+			case strings.EqualFold(t.Name.Local, "MaxFailures"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					fmt.Sscanf(txt, "%d", &target.LoadBalancer.MaxFailures)
+				}
+			case strings.EqualFold(t.Name.Local, "RetryEnabled"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.LoadBalancer.RetryEnabled = strings.ToLower(txt) == "true"
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "LoadBalancer") {
+				return
+			}
+		}
+	}
+}
+
+func (p *XMLParser) parseHealthMonitor(decoder *xml.Decoder, start xml.StartElement, target *TargetEndpoint) {
+	target.HealthMonitor = &HealthMonitor{
+		IsEnabled: strings.ToLower(p.getAttributeValue(start.Attr, "isEnabled")) == "true",
+	}
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "IntervalInSec"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					fmt.Sscanf(txt, "%d", &target.HealthMonitor.IntervalInSec)
+				}
+			case strings.EqualFold(t.Name.Local, "HTTPMonitor"):
+				target.HealthMonitor.HTTPMonitor = &HTTPMonitor{}
+				if port := p.getAttributeValue(t.Attr, "port"); port != "" {
+					fmt.Sscanf(port, "%d", &target.HealthMonitor.HTTPMonitor.Port)
+				}
+				p.parseHTTPMonitor(decoder, target.HealthMonitor.HTTPMonitor)
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "HealthMonitor") {
+				return
+			}
+		}
+	}
+}
+
+func (p *XMLParser) parseHTTPMonitor(decoder *xml.Decoder, monitor *HTTPMonitor) {
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Request"):
+				// Handle inner Request properties if needed
+			case strings.EqualFold(t.Name.Local, "Verb"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					monitor.Request.Verb = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Path"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					monitor.Request.Path = txt
+				}
+			case strings.EqualFold(t.Name.Local, "ConnectTimeoutInSec"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					fmt.Sscanf(txt, "%d", &monitor.Request.ConnectTimeoutInSec)
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "HTTPMonitor") {
+				return
+			}
+		}
+	}
+}
+
+func (p *XMLParser) parseLocalTargetConnection(decoder *xml.Decoder, target *TargetEndpoint) {
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "APIProxy"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.LocalTargetConn.APIProxy = txt
+				}
+			case strings.EqualFold(t.Name.Local, "ProxyEndpoint"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.LocalTargetConn.ProxyEndpoint = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Path"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.LocalTargetConn.PathSuffix = txt
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "LocalTargetConnection") {
+				return
+			}
+		}
+	}
+}
+
+func (p *XMLParser) parseScriptTarget(decoder *xml.Decoder, target *TargetEndpoint) {
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if strings.EqualFold(t.Name.Local, "ResourceURL") {
+				if txt, err := p.readCharData(decoder); err == nil {
+					target.ScriptTarget.ResourceURL = txt
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "ScriptTarget") {
+				return
+			}
+		}
+	}
 }
