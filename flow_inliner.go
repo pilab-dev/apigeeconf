@@ -26,9 +26,9 @@ func InlineSharedFlows(bundle *APIProxyBundle, sharedFlows map[string]*SharedFlo
 		proxy.PostClientFlow.RequestSteps = inlineFlowSteps(proxy.PostClientFlow.RequestSteps, sharedFlows, inlined, bundle, useExternal)
 		proxy.PostClientFlow.ResponseSteps = inlineFlowSteps(proxy.PostClientFlow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
 
-		for _, flow := range proxy.ConditionalFlows {
-			flow.RequestSteps = inlineFlowSteps(flow.RequestSteps, sharedFlows, inlined, bundle, useExternal)
-			flow.ResponseSteps = inlineFlowSteps(flow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
+		for i := range proxy.ConditionalFlows {
+			proxy.ConditionalFlows[i].RequestSteps = inlineFlowSteps(proxy.ConditionalFlows[i].RequestSteps, sharedFlows, inlined, bundle, useExternal)
+			proxy.ConditionalFlows[i].ResponseSteps = inlineFlowSteps(proxy.ConditionalFlows[i].ResponseSteps, sharedFlows, inlined, bundle, useExternal)
 		}
 	}
 
@@ -37,6 +37,11 @@ func InlineSharedFlows(bundle *APIProxyBundle, sharedFlows map[string]*SharedFlo
 		target.PreFlow.ResponseSteps = inlineFlowSteps(target.PreFlow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
 		target.PostFlow.RequestSteps = inlineFlowSteps(target.PostFlow.RequestSteps, sharedFlows, inlined, bundle, useExternal)
 		target.PostFlow.ResponseSteps = inlineFlowSteps(target.PostFlow.ResponseSteps, sharedFlows, inlined, bundle, useExternal)
+
+		for i := range target.ConditionalFlows {
+			target.ConditionalFlows[i].RequestSteps = inlineFlowSteps(target.ConditionalFlows[i].RequestSteps, sharedFlows, inlined, bundle, useExternal)
+			target.ConditionalFlows[i].ResponseSteps = inlineFlowSteps(target.ConditionalFlows[i].ResponseSteps, sharedFlows, inlined, bundle, useExternal)
+		}
 	}
 
 	// Remove FlowCallout policies that were inlined

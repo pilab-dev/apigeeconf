@@ -29,9 +29,9 @@ func (p *XMLParser) parseAssignMessagePolicy(decoder *xml.Decoder, policyName st
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Set":
-				config, _ := p.parseAssignMessageConfig(decoder, "Set")
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Set"):
+				config := p.parseAssignMessageConfig(decoder, elem.Name.Local)
 				policy.AssignMessageSet = config
 				// Also populate main Policy fields for compatibility
 				if config.Verb != "" {
@@ -43,73 +43,29 @@ func (p *XMLParser) parseAssignMessagePolicy(decoder *xml.Decoder, policyName st
 				for k, v := range config.Headers {
 					policy.Headers[k] = v
 				}
-			case "Add":
-				config, _ := p.parseAssignMessageConfig(decoder, "Add")
-				policy.AssignMessageAdd = config
-			case "Remove":
-				config, _ := p.parseAssignMessageConfig(decoder, "Remove")
-				policy.AssignMessageRemove = config
-			case "Copy":
-				config, _ := p.parseAssignMessageConfig(decoder, "Copy")
-				policy.AssignMessageCopy = config
-			case "Replace":
-				config, _ := p.parseAssignMessageConfig(decoder, "Replace")
-				policy.AssignMessageReplace = config
-			case "AssignVariable":
-				var varName, varValue, varRef string
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "Name" {
-						varName = attr.Value
-					}
-				}
-			AssignVarLoop:
-				for {
-					tok, err := decoder.Token()
-					if err != nil {
-						break
-					}
-					switch t := tok.(type) {
-					case xml.StartElement:
-						switch t.Name.Local {
-						case "Name":
-							if txt, err := p.readCharData(decoder); err == nil {
-								varName = txt
-							}
-						case "Value", "Template":
-							if txt, err := p.readCharData(decoder); err == nil {
-								varValue = txt
-							}
-						case "Ref":
-							if txt, err := p.readCharData(decoder); err == nil {
-								varRef = txt
-							}
-						}
-					case xml.EndElement:
-						if t.Name.Local == "AssignVariable" {
-							break AssignVarLoop
-						}
-					}
-				}
-				if varName != "" {
-					if varRef != "" {
-						policy.AssignVariables[varName] = "ref:" + varRef
-					} else {
-						policy.AssignVariables[varName] = varValue
-					}
-				}
-			case "IgnoreUnresolvedVariables":
-				if txt, err := p.readCharData(decoder); err == nil {
-					policy.IgnoreUnresolvedVariables = strings.ToLower(txt) == "true"
-				}
-			case "AssignTo":
+			case strings.EqualFold(elem.Name.Local, "Add"):
+				policy.AssignMessageAdd = p.parseAssignMessageConfig(decoder, elem.Name.Local)
+			case strings.EqualFold(elem.Name.Local, "Remove"):
+				policy.AssignMessageRemove = p.parseAssignMessageConfig(decoder, elem.Name.Local)
+			case strings.EqualFold(elem.Name.Local, "Copy"):
+				policy.AssignMessageCopy = p.parseAssignMessageConfig(decoder, elem.Name.Local)
+			case strings.EqualFold(elem.Name.Local, "Replace"):
+				policy.AssignMessageReplace = p.parseAssignMessageConfig(decoder, elem.Name.Local)
+			case strings.EqualFold(elem.Name.Local, "AssignVariable"):
+				p.parseAssignVariable(decoder, elem, policy)
+			case strings.EqualFold(elem.Name.Local, "IgnoreUnresolvedVariables"):
+				policy.IgnoreUnresolvedVariables = p.readBool(decoder)
+			case strings.EqualFold(elem.Name.Local, "AssignTo"):
 				policy.AssignMessageAssignToType = p.getAttributeValue(elem.Attr, "type")
 				if txt, err := p.readCharData(decoder); err == nil && txt != "" {
 					policy.AssignMessageAssignTo = txt
-					policy.AssignTo = txt // Keep for backwards compatibility
+					policy.AssignTo = txt
 				}
+			case strings.EqualFold(elem.Name.Local, "Properties"):
+				p.parseProperties(decoder, policy.Properties)
 			}
 		case xml.EndElement:
-			if elem.Name.Local == "AssignMessage" {
+			if strings.EqualFold(elem.Name.Local, "AssignMessage") {
 				return jsPolicy, policy, nil
 			}
 		}
@@ -118,7 +74,55 @@ func (p *XMLParser) parseAssignMessagePolicy(decoder *xml.Decoder, policyName st
 	return jsPolicy, policy, nil
 }
 
-func (p *XMLParser) parseAssignMessageConfig(decoder *xml.Decoder, parentTag string) (*AssignMessageConfig, error) {
+func (p *XMLParser) parseAssignVariable(decoder *xml.Decoder, start xml.StartElement, policy *Policy) {
+	var varName, varValue, varRef, varTemplate string
+	varName = p.getAttributeValue(start.Attr, "Name")
+
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Name"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					varName = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Value"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					varValue = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Ref"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					varRef = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Template"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					varTemplate = txt
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "AssignVariable") {
+				if varName != "" {
+					val := varValue
+					if varTemplate != "" {
+						val = varTemplate
+					}
+					if varRef != "" {
+						policy.AssignVariables[varName] = "ref:" + varRef
+					} else {
+						policy.AssignVariables[varName] = val
+					}
+				}
+				return
+			}
+		}
+	}
+}
+
+func (p *XMLParser) parseAssignMessageConfig(decoder *xml.Decoder, parentTag string) *AssignMessageConfig {
 	config := &AssignMessageConfig{
 		Headers:     make(map[string]string),
 		QueryParams: make(map[string]string),
@@ -133,40 +137,40 @@ func (p *XMLParser) parseAssignMessageConfig(decoder *xml.Decoder, parentTag str
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Header":
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Header"):
 				name := p.getAttributeValue(elem.Attr, "name")
 				if val, err := p.readCharData(decoder); err == nil {
 					config.Headers[name] = val
 				}
-			case "QueryParam":
+			case strings.EqualFold(elem.Name.Local, "QueryParam"):
 				name := p.getAttributeValue(elem.Attr, "name")
 				if val, err := p.readCharData(decoder); err == nil {
 					config.QueryParams[name] = val
 				}
-			case "FormParam":
+			case strings.EqualFold(elem.Name.Local, "FormParam"):
 				name := p.getAttributeValue(elem.Attr, "name")
 				if val, err := p.readCharData(decoder); err == nil {
 					config.FormParams[name] = val
 				}
-			case "Payload":
-				if val, err := p.readCharData(decoder); err == nil {
+			case strings.EqualFold(elem.Name.Local, "Payload"):
+				if val := p.readCharDataNested(decoder, "Payload"); val != "" {
 					config.Payload = val
 				}
-			case "Verb":
+			case strings.EqualFold(elem.Name.Local, "Verb"):
 				if val, err := p.readCharData(decoder); err == nil {
 					config.Verb = strings.ToUpper(val)
 				}
-			case "Path":
+			case strings.EqualFold(elem.Name.Local, "Path"):
 				if val, err := p.readCharData(decoder); err == nil {
 					config.Path = val
 				}
 			}
 		case xml.EndElement:
-			if elem.Name.Local == parentTag {
-				return config, nil
+			if strings.EqualFold(elem.Name.Local, parentTag) {
+				return config
 			}
 		}
 	}
-	return config, nil
+	return config
 }

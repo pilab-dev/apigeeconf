@@ -2,7 +2,6 @@ package apigeeconf
 
 import (
 	"encoding/xml"
-	"fmt"
 	"strings"
 )
 
@@ -29,33 +28,31 @@ func (p *XMLParser) parseKeyValueMapPolicy(decoder *xml.Decoder, policyName stri
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "KeyValueMapOperations":
+			switch {
+			case strings.EqualFold(elem.Name.Local, "KeyValueMapOperations"):
 				policy.KVMMapIdentifier = p.getAttributeValue(elem.Attr, "mapIdentifier")
 				if policy.KVMMapIdentifier == "" {
 					policy.KVMMapIdentifier = p.getAttributeValue(elem.Attr, "name")
 				}
-			case "Scope":
+			case strings.EqualFold(elem.Name.Local, "Scope"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.KVMScope = txt
 				}
-			case "ExpiryTimeInSecs":
-				if txt, err := p.readCharData(decoder); err == nil {
-					fmt.Sscanf(txt, "%d", &policy.KVMExpiryTimeInSecs)
-				}
-			case "ExclusiveCache":
-				if txt, err := p.readCharData(decoder); err == nil {
-					policy.KVMExclusiveCache = strings.ToLower(txt) == "true"
-				}
-			case "Get":
+			case strings.EqualFold(elem.Name.Local, "ExpiryTimeInSecs"):
+				policy.KVMExpiryTimeInSecs = p.readInt(decoder)
+			case strings.EqualFold(elem.Name.Local, "ExclusiveCache"):
+				policy.KVMExclusiveCache = p.readBool(decoder)
+			case strings.EqualFold(elem.Name.Local, "Get"):
 				p.parseKVMOperation(decoder, "Get", elem.Attr, policy)
-			case "Put":
+			case strings.EqualFold(elem.Name.Local, "Put"):
 				p.parseKVMOperation(decoder, "Put", elem.Attr, policy)
-			case "Delete":
+			case strings.EqualFold(elem.Name.Local, "Delete"):
 				p.parseKVMOperation(decoder, "Delete", elem.Attr, policy)
+			case strings.EqualFold(elem.Name.Local, "Properties"):
+				p.parseProperties(decoder, policy.Properties)
 			}
 		case xml.EndElement:
-			if elem.Name.Local == "KeyValueMapOperations" {
+			if strings.EqualFold(elem.Name.Local, "KeyValueMapOperations") {
 				return jsPolicy, policy, nil
 			}
 		}
@@ -69,7 +66,7 @@ func (p *XMLParser) parseKVMOperation(decoder *xml.Decoder, opType string, attrs
 		Operation: opType,
 	}
 
-	if opType == "Get" {
+	if strings.EqualFold(opType, "Get") {
 		op.AssignTo = p.getAttributeValue(attrs, "assignTo")
 		policy.KVMIndex = p.getAttributeValue(attrs, "index")
 	}
@@ -81,9 +78,8 @@ func (p *XMLParser) parseKVMOperation(decoder *xml.Decoder, opType string, attrs
 		}
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Key":
-				// Parse Key which contains multiple Parameter elements
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Key"):
 			KeyLoop:
 				for {
 					tok, err := decoder.Token()
@@ -92,7 +88,7 @@ func (p *XMLParser) parseKVMOperation(decoder *xml.Decoder, opType string, attrs
 					}
 					switch t := tok.(type) {
 					case xml.StartElement:
-						if t.Name.Local == "Parameter" {
+						if strings.EqualFold(t.Name.Local, "Parameter") {
 							ref := p.getAttributeValue(t.Attr, "ref")
 							if txt, err := p.readCharData(decoder); err == nil {
 								if ref != "" {
@@ -103,12 +99,12 @@ func (p *XMLParser) parseKVMOperation(decoder *xml.Decoder, opType string, attrs
 							}
 						}
 					case xml.EndElement:
-						if t.Name.Local == "Key" {
+						if strings.EqualFold(t.Name.Local, "Key") {
 							break KeyLoop
 						}
 					}
 				}
-			case "Value":
+			case strings.EqualFold(elem.Name.Local, "Value"):
 				ref := p.getAttributeValue(elem.Attr, "ref")
 				if txt, err := p.readCharData(decoder); err == nil {
 					if ref != "" {
@@ -119,7 +115,7 @@ func (p *XMLParser) parseKVMOperation(decoder *xml.Decoder, opType string, attrs
 				}
 			}
 		case xml.EndElement:
-			if elem.Name.Local == opType {
+			if strings.EqualFold(elem.Name.Local, opType) {
 				policy.KVMOperations = append(policy.KVMOperations, op)
 				return
 			}
@@ -137,11 +133,6 @@ func (p *XMLParser) parseMessageLoggingPolicy(decoder *xml.Decoder, policyName s
 
 	jsPolicy := &JavaScriptPolicy{Name: policyName, Properties: make(map[string]string), Includes: []string{}}
 
-	var inSyslog bool
-	var inFile bool
-	var inMessage bool
-	var messageBuilder strings.Builder
-
 	for {
 		token, err := decoder.Token()
 		if err != nil {
@@ -150,79 +141,21 @@ func (p *XMLParser) parseMessageLoggingPolicy(decoder *xml.Decoder, policyName s
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Syslog":
-				inSyslog = true
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Syslog"):
 				policy.MessageLoggingDestination = "Syslog"
 				policy.MessageLoggingSyslog = &SyslogConfig{}
-			case "File":
-				inFile = true
+				p.parseSyslogConfig(decoder, policy.MessageLoggingSyslog)
+			case strings.EqualFold(elem.Name.Local, "File"):
 				policy.MessageLoggingDestination = "File"
 				policy.MessageLoggingFile = &FileConfig{}
-			case "Message":
-				inMessage = true
-				messageBuilder.Reset()
-			case "Host":
-				if inSyslog {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							policy.MessageLoggingSyslog.Host = strings.TrimSpace(string(char))
-						}
-					}
-				}
-			case "Port":
-				if inSyslog {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							fmt.Sscanf(strings.TrimSpace(string(char)), "%d", &policy.MessageLoggingSyslog.Port)
-						}
-					}
-				}
-			case "Protocol":
-				if inSyslog {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							policy.MessageLoggingSyslog.Protocol = strings.TrimSpace(string(char))
-						}
-					}
-				}
-			case "FormatMessage":
-				if inSyslog {
-					if tok, err := decoder.Token(); err == nil {
-						if char, ok := tok.(xml.CharData); ok {
-							val := strings.TrimSpace(string(char))
-							policy.MessageLoggingSyslog.FormatMessage = strings.ToLower(val) == "true"
-						}
-					}
-				}
-			case "FileName":
-				if inFile {
-					// Not stored in FileConfig currently
-				}
-			case "logLevel":
-				// Not stored currently
-			case "BufferMessage":
-				// Not stored currently
-			}
-		case xml.CharData:
-			if inMessage {
-				messageBuilder.WriteString(string(elem))
+				p.parseFileLogConfig(decoder, policy.MessageLoggingFile)
+			case strings.EqualFold(elem.Name.Local, "Properties"):
+				p.parseProperties(decoder, policy.Properties)
 			}
 		case xml.EndElement:
-			switch elem.Name.Local {
-			case "Syslog":
-				inSyslog = false
-			case "File":
-				inFile = false
-			case "Message":
-				inMessage = false
-				msg := messageBuilder.String()
-				if policy.MessageLoggingDestination == "Syslog" && policy.MessageLoggingSyslog != nil {
-					policy.MessageLoggingSyslog.Message = msg
-				} else if policy.MessageLoggingDestination == "File" && policy.MessageLoggingFile != nil {
-					policy.MessageLoggingFile.Message = msg
-				}
-				policy.MessageLoggingFormat = msg
+			if strings.EqualFold(elem.Name.Local, "MessageLogging") {
+				return jsPolicy, policy, nil
 			}
 		}
 	}
@@ -230,17 +163,149 @@ func (p *XMLParser) parseMessageLoggingPolicy(decoder *xml.Decoder, policyName s
 	return jsPolicy, policy, nil
 }
 
+func (p *XMLParser) parseSyslogConfig(decoder *xml.Decoder, config *SyslogConfig) {
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Message"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					config.Message = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Host"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					config.Host = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Port"):
+				config.Port = p.readInt(decoder)
+			case strings.EqualFold(t.Name.Local, "Protocol"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					config.Protocol = txt
+				}
+			case strings.EqualFold(t.Name.Local, "FormatMessage"):
+				config.FormatMessage = p.readBool(decoder)
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "Syslog") {
+				return
+			}
+		}
+	}
+}
+
+func (p *XMLParser) parseFileLogConfig(decoder *xml.Decoder, config *FileConfig) {
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if strings.EqualFold(t.Name.Local, "Message") {
+				if txt, err := p.readCharData(decoder); err == nil {
+					config.Message = txt
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "File") {
+				return
+			}
+		}
+	}
+}
+
 // parseStatisticsCollectorPolicy parses a StatisticsCollector policy
 func (p *XMLParser) parseStatisticsCollectorPolicy(decoder *xml.Decoder, policyName string) (*JavaScriptPolicy, *Policy, error) {
 	policy := &Policy{Type: PolicyTypeStatistics, Name: policyName, Properties: make(map[string]string)}
 	jsPolicy := &JavaScriptPolicy{Name: policyName, Properties: make(map[string]string), Includes: []string{}}
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if strings.EqualFold(t.Name.Local, "Statistics") {
+				p.parseStatistics(decoder, policy)
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "StatisticsCollector") {
+				return jsPolicy, policy, nil
+			}
+		}
+	}
 	return jsPolicy, policy, nil
+}
+
+func (p *XMLParser) parseStatistics(decoder *xml.Decoder, policy *Policy) {
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if strings.EqualFold(t.Name.Local, "Statistic") {
+				stat := StatisticsDimension{
+					Name:  p.getAttributeValue(t.Attr, "name"),
+					Ref:   p.getAttributeValue(t.Attr, "ref"),
+				}
+				if txt, err := p.readCharData(decoder); err == nil {
+					stat.Value = txt
+				}
+				policy.StatisticsDimensions = append(policy.StatisticsDimensions, stat)
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "Statistics") {
+				return
+			}
+		}
+	}
 }
 
 // parseCORSPolicy parses a CORS policy
 func (p *XMLParser) parseCORSPolicy(decoder *xml.Decoder, policyName string) (*JavaScriptPolicy, *Policy, error) {
 	policy := &Policy{Type: PolicyTypeCors, Name: policyName, Properties: make(map[string]string)}
 	jsPolicy := &JavaScriptPolicy{Name: policyName, Properties: make(map[string]string), Includes: []string{}}
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "AllowOrigins"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.CORSAllowOrigins = strings.Split(txt, ",")
+				}
+			case strings.EqualFold(t.Name.Local, "AllowMethods"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.CORSAllowMethods = strings.Split(txt, ",")
+				}
+			case strings.EqualFold(t.Name.Local, "AllowHeaders"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.CORSAllowHeaders = strings.Split(txt, ",")
+				}
+			case strings.EqualFold(t.Name.Local, "ExposeHeaders"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.CORSExposeHeaders = strings.Split(txt, ",")
+				}
+			case strings.EqualFold(t.Name.Local, "MaxAge"):
+				policy.CORSMaxAge = p.readInt(decoder)
+			case strings.EqualFold(t.Name.Local, "AllowCredentials"):
+				policy.CORSAllowCredentials = p.readBool(decoder)
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "CORS") {
+				return jsPolicy, policy, nil
+			}
+		}
+	}
 	return jsPolicy, policy, nil
 }
 
@@ -248,6 +313,33 @@ func (p *XMLParser) parseCORSPolicy(decoder *xml.Decoder, policyName string) (*J
 func (p *XMLParser) parseResponseCachePolicy(decoder *xml.Decoder, policyName string) (*JavaScriptPolicy, *Policy, error) {
 	policy := &Policy{Type: PolicyTypeResponseCache, Name: policyName, Properties: make(map[string]string)}
 	jsPolicy := &JavaScriptPolicy{Name: policyName, Properties: make(map[string]string), Includes: []string{}}
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "CacheKey"):
+				// Handle CacheKey
+			case strings.EqualFold(t.Name.Local, "ExpirySettings"):
+				// Handle Expiry
+			case strings.EqualFold(t.Name.Local, "CacheResource"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.CacheResource = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Scope"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.CacheScope = txt
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "ResponseCache") {
+				return jsPolicy, policy, nil
+			}
+		}
+	}
 	return jsPolicy, policy, nil
 }
 
@@ -263,47 +355,28 @@ func (p *XMLParser) parsePopulateCachePolicy(decoder *xml.Decoder, policyName st
 		}
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "CacheKey":
-				if txt, err := p.readCharData(decoder); err == nil {
+			switch {
+			case strings.EqualFold(elem.Name.Local, "CacheKey"):
+				// Should parse children
+			case strings.EqualFold(elem.Name.Local, "Source"):
+				policy.CacheKeyRef = p.getAttributeValue(elem.Attr, "ref")
+				if txt, err := p.readCharData(decoder); err == nil && policy.CacheKey == "" {
 					policy.CacheKey = txt
 				}
-			case "Source":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "ref" {
-						policy.CacheKeyRef = attr.Value
-					}
-				}
-				if txt, err := p.readCharData(decoder); err == nil {
-					if policy.CacheKey == "" {
-						policy.CacheKey = txt
-					}
-				}
-			case "Expiry":
-				if txt, err := p.readCharData(decoder); err == nil {
-					fmt.Sscanf(txt, "%d", &policy.CacheExpiry)
-				}
-			case "Scope":
+			case strings.EqualFold(elem.Name.Local, "ExpirySettings"):
+				// Handle Expiry
+			case strings.EqualFold(elem.Name.Local, "Scope"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.CacheScope = txt
 				}
-			case "Timeout":
-				if txt, err := p.readCharData(decoder); err == nil {
-					fmt.Sscanf(txt, "%d", &policy.CacheTimeout)
-				}
-			case "CacheResource":
+			case strings.EqualFold(elem.Name.Local, "CacheResource"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.CacheResource = txt
 				}
-			default:
-				if len(elem.Attr) > 0 {
-					for _, attr := range elem.Attr {
-						if attr.Name.Local == "ref" {
-							policy.CacheValueRef = attr.Value
-						}
-					}
-				}
-				decoder.Skip()
+			}
+		case xml.EndElement:
+			if strings.EqualFold(elem.Name.Local, "PopulateCache") {
+				return jsPolicy, policy, nil
 			}
 		}
 	}
@@ -323,40 +396,25 @@ func (p *XMLParser) parseLookupCachePolicy(decoder *xml.Decoder, policyName stri
 		}
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "CacheKey":
-				if txt, err := p.readCharData(decoder); err == nil {
-					policy.LookupCacheKey = txt
-				}
-			case "Source":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "ref" {
-						policy.LookupCacheKeyRef = attr.Value
-					}
-				}
-				if txt, err := p.readCharData(decoder); err == nil {
-					if policy.LookupCacheKey == "" {
-						policy.LookupCacheKey = txt
-					}
-				}
-			case "Scope":
-				if txt, err := p.readCharData(decoder); err == nil {
-					policy.LookupCacheScope = txt
-				}
-			case "AssignTo":
+			switch {
+			case strings.EqualFold(elem.Name.Local, "CacheKey"):
+				// Should parse children
+			case strings.EqualFold(elem.Name.Local, "AssignTo"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.LookupCacheAssignTo = txt
 				}
-			case "CacheResource":
+			case strings.EqualFold(elem.Name.Local, "Scope"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.LookupCacheScope = txt
+				}
+			case strings.EqualFold(elem.Name.Local, "CacheResource"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.LookupCacheResource = txt
 				}
-			case "SkipCacheOnHit":
-				if txt, err := p.readCharData(decoder); err == nil {
-					policy.LookupCacheSkipCacheOnHit = txt == "true"
-				}
-			default:
-				decoder.Skip()
+			}
+		case xml.EndElement:
+			if strings.EqualFold(elem.Name.Local, "LookupCache") {
+				return jsPolicy, policy, nil
 			}
 		}
 	}
@@ -401,21 +459,21 @@ func (p *XMLParser) parseXMLtoJSONPolicy(decoder *xml.Decoder, policyName string
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Source":
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Source"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.XMLToJSONSource = txt
 					policy.Source = txt // Compatibility
 				}
-			case "OutputVariable":
+			case strings.EqualFold(elem.Name.Local, "OutputVariable"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.XMLToJSONOutputVariable = txt
 				}
-			case "Options":
+			case strings.EqualFold(elem.Name.Local, "Options"):
 				p.parseXMLToJSONOptions(decoder, policy)
 			}
 		case xml.EndElement:
-			if elem.Name.Local == "XMLtoJSON" {
+			if strings.EqualFold(elem.Name.Local, "XMLtoJSON") {
 				return jsPolicy, policy, nil
 			}
 		}
@@ -436,7 +494,7 @@ func (p *XMLParser) parseXMLToJSONOptions(decoder *xml.Decoder, policy *Policy) 
 				policy.XMLToJSONOptions[elem.Name.Local] = txt
 			}
 		case xml.EndElement:
-			if elem.Name.Local == "Options" {
+			if strings.EqualFold(elem.Name.Local, "Options") {
 				return
 			}
 		}
@@ -455,21 +513,23 @@ func (p *XMLParser) parseXSLTransformPolicy(decoder *xml.Decoder, policyName str
 		}
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Source":
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Source"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.XSLSource = txt
 				}
-			case "ResourceURL":
+			case strings.EqualFold(elem.Name.Local, "ResourceURL"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.XSLResource = txt
 				}
-			case "OutputVariable":
+			case strings.EqualFold(elem.Name.Local, "OutputVariable"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.XSLOutputVariable = txt
 				}
-			case "Parameters":
-				decoder.Skip()
+			}
+		case xml.EndElement:
+			if strings.EqualFold(elem.Name.Local, "XSLTransform") {
+				return jsPolicy, policy, nil
 			}
 		}
 	}
@@ -494,27 +554,6 @@ func (p *XMLParser) parseExtensionCalloutPolicy(decoder *xml.Decoder, policyName
 // parseHMACPolicy parses a HMAC policy
 func (p *XMLParser) parseHMACPolicy(decoder *xml.Decoder, policyName string) (*JavaScriptPolicy, *Policy, error) {
 	policy := &Policy{Type: PolicyTypeHMAC, Name: policyName, Properties: make(map[string]string)}
-	jsPolicy := &JavaScriptPolicy{Name: policyName, Properties: make(map[string]string), Includes: []string{}}
-	return jsPolicy, policy, nil
-}
-
-// parseJavaCalloutPolicy parses a JavaCallout policy
-func (p *XMLParser) parseJavaCalloutPolicy(decoder *xml.Decoder, policyName string) (*JavaScriptPolicy, *Policy, error) {
-	policy := &Policy{Type: PolicyTypeJavaCallout, Name: policyName, Properties: make(map[string]string)}
-	jsPolicy := &JavaScriptPolicy{Name: policyName, Properties: make(map[string]string), Includes: []string{}}
-	return jsPolicy, policy, nil
-}
-
-// parsePythonScriptPolicy parses a PythonScript policy
-func (p *XMLParser) parsePythonScriptPolicy(decoder *xml.Decoder, policyName string) (*JavaScriptPolicy, *Policy, error) {
-	policy := &Policy{Type: PolicyTypePythonScript, Name: policyName, Properties: make(map[string]string)}
-	jsPolicy := &JavaScriptPolicy{Name: policyName, Properties: make(map[string]string), Includes: []string{}}
-	return jsPolicy, policy, nil
-}
-
-// parseResetQuotaPolicy parses a ResetQuota policy
-func (p *XMLParser) parseResetQuotaPolicy(decoder *xml.Decoder, policyName string) (*JavaScriptPolicy, *Policy, error) {
-	policy := &Policy{Type: PolicyTypeResetQuota, Name: policyName, Properties: make(map[string]string)}
 	jsPolicy := &JavaScriptPolicy{Name: policyName, Properties: make(map[string]string), Includes: []string{}}
 	return jsPolicy, policy, nil
 }

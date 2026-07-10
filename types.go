@@ -390,6 +390,7 @@ type VariableConfig struct {
 	QueryParamName string // For QueryParam
 	FormParamName  string // For FormParam
 	Source         string // For Variable element
+	IgnoreCase     bool   // For Pattern in ExtractVariables
 }
 
 // ServiceCalloutConfig represents service callout configuration

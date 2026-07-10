@@ -24,44 +24,30 @@ func (p *XMLParser) parseSpikeArrestPolicy(decoder *xml.Decoder, policyName stri
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Rate":
-				var rateRef string
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "ref" {
-						rateRef = attr.Value
-					}
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Rate"):
+				policy.SpikeRateRef = p.getAttributeValue(elem.Attr, "ref")
+				if txt, err := p.readCharData(decoder); err == nil && txt != "" {
+					policy.SpikeRate = txt
 				}
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						rate := strings.TrimSpace(string(char))
-						if rate != "" {
-							policy.SpikeRate = rate
-						}
-					}
+			case strings.EqualFold(elem.Name.Local, "Identifier"):
+				policy.SpikeIdentifier = p.getAttributeValue(elem.Attr, "ref")
+				if txt, err := p.readCharData(decoder); err == nil && policy.SpikeIdentifier == "" {
+					policy.SpikeIdentifier = txt
 				}
-				if rateRef != "" {
-					policy.SpikeRateRef = rateRef
+			case strings.EqualFold(elem.Name.Local, "MessageWeight"):
+				policy.SpikeMessageWeight = p.getAttributeValue(elem.Attr, "ref")
+				if txt, err := p.readCharData(decoder); err == nil && policy.SpikeMessageWeight == "" {
+					policy.SpikeMessageWeight = txt
 				}
-			case "Identifier":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "ref" {
-						policy.SpikeIdentifier = attr.Value
-					}
-				}
-			case "MessageWeight":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "ref" {
-						policy.SpikeMessageWeight = attr.Value
-					}
-				}
-			case "UseEffectiveCount":
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						val := strings.TrimSpace(string(char))
-						policy.SpikeUseEffectiveCount = strings.ToLower(val) == "true"
-					}
-				}
+			case strings.EqualFold(elem.Name.Local, "UseEffectiveCount"):
+				policy.SpikeUseEffectiveCount = p.readBool(decoder)
+			case strings.EqualFold(elem.Name.Local, "Properties"):
+				p.parseProperties(decoder, policy.Properties)
+			}
+		case xml.EndElement:
+			if strings.EqualFold(elem.Name.Local, "SpikeArrest") {
+				return jsPolicy, policy, nil
 			}
 		}
 	}
@@ -87,94 +73,47 @@ func (p *XMLParser) parseQuotaPolicy(decoder *xml.Decoder, policyName string) (*
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Interval":
-				var intervalRef string
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "ref" {
-						intervalRef = attr.Value
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Interval"):
+				policy.QuotaIntervalRef = p.getAttributeValue(elem.Attr, "ref")
+				policy.QuotaInterval = p.readInt(decoder)
+			case strings.EqualFold(elem.Name.Local, "TimeUnit"):
+				policy.QuotaTimeUnitRef = p.getAttributeValue(elem.Attr, "ref")
+				if txt, err := p.readCharData(decoder); err == nil && txt != "" {
+					policy.QuotaTimeUnit = txt
+				}
+			case strings.EqualFold(elem.Name.Local, "Allow"):
+				policy.QuotaAllowRef = p.getAttributeValue(elem.Attr, "countRef")
+				policy.QuotaAllow = p.readInt(decoder)
+				if policy.QuotaAllow == 0 {
+					if count := p.getAttributeValue(elem.Attr, "count"); count != "" {
+						fmt.Sscanf(count, "%d", &policy.QuotaAllow)
 					}
 				}
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						val := strings.TrimSpace(string(char))
-						if val != "" {
-							fmt.Sscanf(val, "%d", &policy.QuotaInterval)
-						}
-					}
+			case strings.EqualFold(elem.Name.Local, "StartTime"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.QuotaStartTime = txt
 				}
-				if intervalRef != "" {
-					policy.QuotaIntervalRef = intervalRef
+			case strings.EqualFold(elem.Name.Local, "Identifier"):
+				policy.QuotaIdentifier = p.getAttributeValue(elem.Attr, "ref")
+				if txt, err := p.readCharData(decoder); err == nil && policy.QuotaIdentifier == "" {
+					policy.QuotaIdentifier = txt
 				}
-			case "TimeUnit":
-				var timeUnitRef string
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "ref" {
-						timeUnitRef = attr.Value
-					}
+			case strings.EqualFold(elem.Name.Local, "Distributed"):
+				policy.QuotaDistributed = p.readBool(decoder)
+			case strings.EqualFold(elem.Name.Local, "Synchronous"):
+				policy.QuotaSynchronous = p.readBool(decoder)
+			case strings.EqualFold(elem.Name.Local, "MessageWeight"):
+				policy.QuotaMessageWeight = p.getAttributeValue(elem.Attr, "ref")
+				if txt, err := p.readCharData(decoder); err == nil && policy.QuotaMessageWeight == "" {
+					policy.QuotaMessageWeight = txt
 				}
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						val := strings.TrimSpace(string(char))
-						if val != "" {
-							policy.QuotaTimeUnit = val
-						}
-					}
-				}
-				if timeUnitRef != "" {
-					policy.QuotaTimeUnitRef = timeUnitRef
-				}
-			case "Allow":
-				var countRef string
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "count" {
-						fmt.Sscanf(attr.Value, "%d", &policy.QuotaAllow)
-					}
-					if attr.Name.Local == "countRef" {
-						countRef = attr.Value
-					}
-				}
-				if tok, err := decoder.Token(); err == nil {
-					// Check for Class element
-					if start, ok := tok.(xml.StartElement); ok && start.Name.Local == "Class" {
-						// Skip Class for now
-					}
-				}
-				if countRef != "" {
-					policy.QuotaAllowRef = countRef
-				}
-			case "StartTime":
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						policy.QuotaStartTime = strings.TrimSpace(string(char))
-					}
-				}
-			case "Identifier":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "ref" {
-						policy.QuotaIdentifier = attr.Value
-					}
-				}
-			case "Distributed":
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						val := strings.TrimSpace(string(char))
-						policy.QuotaDistributed = strings.ToLower(val) == "true"
-					}
-				}
-			case "Synchronous":
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						val := strings.TrimSpace(string(char))
-						policy.QuotaSynchronous = strings.ToLower(val) == "true"
-					}
-				}
-			case "MessageWeight":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "ref" {
-						policy.QuotaMessageWeight = attr.Value
-					}
-				}
+			case strings.EqualFold(elem.Name.Local, "Properties"):
+				p.parseProperties(decoder, policy.Properties)
+			}
+		case xml.EndElement:
+			if strings.EqualFold(elem.Name.Local, "Quota") {
+				return jsPolicy, policy, nil
 			}
 		}
 	}
@@ -193,30 +132,28 @@ func (p *XMLParser) parseConcurrentRatePolicy(decoder *xml.Decoder, policyName s
 		}
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "AllowConnections":
+			switch {
+			case strings.EqualFold(elem.Name.Local, "AllowConnections"):
 				for _, attr := range elem.Attr {
-					switch attr.Name.Local {
-					case "count":
+					if strings.EqualFold(attr.Name.Local, "count") {
 						fmt.Sscanf(attr.Value, "%d", &policy.ConcurrentRateAllowConnections)
-					case "ttl":
+					}
+					if strings.EqualFold(attr.Name.Local, "ttl") {
 						fmt.Sscanf(attr.Value, "%d", &policy.ConcurrentRateTTL)
 					}
 				}
-			case "Distributed":
-				if txt, err := p.readCharData(decoder); err == nil {
-					policy.ConcurrentRateDistributed = txt == "true"
-				}
-			case "StrictOnTtl":
-				if txt, err := p.readCharData(decoder); err == nil {
-					policy.ConcurrentRateStrictOnTTL = txt == "true"
-				}
-			case "TargetIdentifier":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "name" {
-						policy.ConcurrentRateTargetIdentifier = attr.Value
-					}
-				}
+			case strings.EqualFold(elem.Name.Local, "Distributed"):
+				policy.ConcurrentRateDistributed = p.readBool(decoder)
+			case strings.EqualFold(elem.Name.Local, "StrictOnTtl"):
+				policy.ConcurrentRateStrictOnTTL = p.readBool(decoder)
+			case strings.EqualFold(elem.Name.Local, "TargetIdentifier"):
+				policy.ConcurrentRateTargetIdentifier = p.getAttributeValue(elem.Attr, "name")
+			case strings.EqualFold(elem.Name.Local, "Properties"):
+				p.parseProperties(decoder, policy.Properties)
+			}
+		case xml.EndElement:
+			if strings.EqualFold(elem.Name.Local, "ConcurrentRatelimit") {
+				return jsPolicy, policy, nil
 			}
 		}
 	}

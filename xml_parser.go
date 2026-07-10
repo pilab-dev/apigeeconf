@@ -151,18 +151,251 @@ func (p *XMLParser) ResolveJSCPath(jscPath string) string {
 }
 
 func (p *XMLParser) readCharData(decoder *xml.Decoder) (string, error) {
+	depth := 0
+	var result strings.Builder
 	for {
 		tok, err := decoder.Token()
 		if err != nil {
-			return "", err
+			if result.Len() == 0 {
+				return "", err
+			}
+			return result.String(), nil
 		}
-		if char, ok := tok.(xml.CharData); ok {
-			return strings.TrimSpace(string(char)), nil
-		}
-		if _, ok := tok.(xml.EndElement); ok {
-			return "", nil
+		switch v := tok.(type) {
+		case xml.CharData:
+			result.WriteString(string(v))
+		case xml.StartElement:
+			depth++
+		case xml.EndElement:
+			if depth == 0 {
+				return strings.TrimSpace(result.String()), nil
+			}
+			depth--
+		case xml.Comment:
+			// Ignore comments
+		case xml.ProcInst:
+			// Ignore processing instructions
+		case xml.Directive:
+			// Ignore directives
 		}
 	}
+}
+
+func (p *XMLParser) readCharDataNested(decoder *xml.Decoder, parentName string) string {
+	depth := 1
+	var result strings.Builder
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			return strings.TrimSpace(result.String())
+		}
+		switch v := tok.(type) {
+		case xml.CharData:
+			result.WriteString(string(v))
+		case xml.StartElement:
+			result.WriteString("<" + v.Name.Local)
+			for _, a := range v.Attr {
+				result.WriteString(" " + a.Name.Local + "=\"" + a.Value + "\"")
+			}
+			result.WriteString(">")
+			depth++
+		case xml.EndElement:
+			if v.Name.Local == parentName && depth == 1 {
+				return result.String()
+			}
+			result.WriteString("</" + v.Name.Local + ">")
+			depth--
+		}
+	}
+}
+
+// parseFlowStep parses a Step element
+func (p *XMLParser) parseFlowStep(decoder *xml.Decoder, start xml.StartElement) FlowStep {
+	step := FlowStep{}
+	for _, attr := range start.Attr {
+		if strings.EqualFold(attr.Name.Local, "Name") {
+			step.PolicyName = attr.Value
+		}
+		if strings.EqualFold(attr.Name.Local, "ContinueOnError") {
+			step.ContinueOnError = strings.ToLower(attr.Value) == "true"
+		}
+	}
+
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Name"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					step.PolicyName = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Condition"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					step.Condition = txt
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "Step") {
+				return step
+			}
+		}
+	}
+	return step
+}
+
+// parseFlowPhaseConfig parses PreFlow, PostFlow or PostClientFlow
+func (p *XMLParser) parseFlowPhaseConfig(decoder *xml.Decoder, parentTag string) FlowPhaseConfig {
+	config := FlowPhaseConfig{RequestSteps: []FlowStep{}, ResponseSteps: []FlowStep{}}
+	var currentSide string
+
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Description"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					config.Description = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Request"):
+				currentSide = "Request"
+			case strings.EqualFold(t.Name.Local, "Response"):
+				currentSide = "Response"
+			case strings.EqualFold(t.Name.Local, "Step"):
+				step := p.parseFlowStep(decoder, t)
+				if currentSide == "Request" {
+					config.RequestSteps = append(config.RequestSteps, step)
+				} else {
+					config.ResponseSteps = append(config.ResponseSteps, step)
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, parentTag) {
+				return config
+			}
+		}
+	}
+	return config
+}
+
+// parseConditionalFlow parses a Flow element
+func (p *XMLParser) parseConditionalFlow(decoder *xml.Decoder, start xml.StartElement) ConditionalFlow {
+	flow := ConditionalFlow{RequestSteps: []FlowStep{}, ResponseSteps: []FlowStep{}}
+	for _, attr := range start.Attr {
+		if strings.EqualFold(attr.Name.Local, "Name") {
+			flow.Name = attr.Value
+		}
+	}
+
+	var currentSide string
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Description"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					flow.Description = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Condition"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					flow.Condition = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Request"):
+				currentSide = "Request"
+			case strings.EqualFold(t.Name.Local, "Response"):
+				currentSide = "Response"
+			case strings.EqualFold(t.Name.Local, "Step"):
+				step := p.parseFlowStep(decoder, t)
+				if currentSide == "Request" {
+					flow.RequestSteps = append(flow.RequestSteps, step)
+				} else {
+					flow.ResponseSteps = append(flow.ResponseSteps, step)
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "Flow") {
+				return flow
+			}
+		}
+	}
+	return flow
+}
+
+// parseFaultRule parses a FaultRule element
+func (p *XMLParser) parseFaultRule(decoder *xml.Decoder, start xml.StartElement) FaultRule {
+	fr := FaultRule{Steps: []FlowStep{}}
+	for _, attr := range start.Attr {
+		if strings.EqualFold(attr.Name.Local, "Name") {
+			fr.Name = attr.Value
+		}
+	}
+
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Condition"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					fr.Condition = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Step"):
+				fr.Steps = append(fr.Steps, p.parseFlowStep(decoder, t))
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "FaultRule") {
+				return fr
+			}
+		}
+	}
+	return fr
+}
+
+// parseDefaultFaultRule parses a DefaultFaultRule element
+func (p *XMLParser) parseDefaultFaultRule(decoder *xml.Decoder, start xml.StartElement) DefaultFaultRule {
+	dfr := DefaultFaultRule{Steps: []FlowStep{}}
+	for _, attr := range start.Attr {
+		if strings.EqualFold(attr.Name.Local, "AlwaysEnforce") {
+			dfr.AlwaysEnforce = strings.ToLower(attr.Value) == "true"
+		}
+	}
+
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			switch {
+			case strings.EqualFold(t.Name.Local, "Condition"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					dfr.Condition = txt
+				}
+			case strings.EqualFold(t.Name.Local, "Step"):
+				dfr.Steps = append(dfr.Steps, p.parseFlowStep(decoder, t))
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "DefaultFaultRule") {
+				return dfr
+			}
+		}
+	}
+	return dfr
 }
 
 // parseSharedFlowFile parses a shared flow XML file and returns SharedFlowDefinition
@@ -244,9 +477,48 @@ func (p *XMLParser) ParseSharedFlowBundle() (*APIProxyBundle, error) {
 	return bundle, nil
 }
 
+func (p *XMLParser) parseProperties(decoder *xml.Decoder, props map[string]string) {
+	for {
+		tok, err := decoder.Token()
+		if err != nil {
+			break
+		}
+		switch t := tok.(type) {
+		case xml.StartElement:
+			if strings.EqualFold(t.Name.Local, "Property") {
+				name := p.getAttributeValue(t.Attr, "name")
+				if txt, err := p.readCharData(decoder); err == nil {
+					props[name] = txt
+				}
+			}
+		case xml.EndElement:
+			if strings.EqualFold(t.Name.Local, "Properties") {
+				return
+			}
+		}
+	}
+}
+
+// readBool returns true if the element text is "true" (case-insensitive)
+func (p *XMLParser) readBool(decoder *xml.Decoder) bool {
+	if txt, err := p.readCharData(decoder); err == nil {
+		return strings.ToLower(txt) == "true"
+	}
+	return false
+}
+
+// readInt returns the integer value of the element text
+func (p *XMLParser) readInt(decoder *xml.Decoder) int {
+	var val int
+	if txt, err := p.readCharData(decoder); err == nil {
+		fmt.Sscanf(txt, "%d", &val)
+	}
+	return val
+}
+
 func (p *XMLParser) getAttributeValue(attrs []xml.Attr, name string) string {
 	for _, attr := range attrs {
-		if attr.Name.Local == name {
+		if strings.EqualFold(attr.Name.Local, name) {
 			return attr.Value
 		}
 	}
