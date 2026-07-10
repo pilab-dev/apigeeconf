@@ -2,6 +2,7 @@ package apigeeconf
 
 import (
 	"encoding/xml"
+	"os"
 	"strings"
 	"testing"
 )
@@ -96,7 +97,11 @@ func TestParseExtractVariablesVariableElement(t *testing.T) {
 }
 
 func TestLoadBundleWithVariableElement(t *testing.T) {
-	bundle, err := LoadBundle("/Users/paalgyula/wspace/yettel/apigee-to-tyk-etl/get-apiproxies-artifacts/import_zip/Maximus_rev11.zip")
+	bundlePath := "/Users/paalgyula/wspace/yettel/apigee-to-tyk-etl/get-apiproxies-artifacts/import_zip/Maximus_rev11.zip"
+	if _, err := os.Stat(bundlePath); err != nil {
+		t.Skipf("skipping: test fixture not found at %s", bundlePath)
+	}
+	bundle, err := LoadBundle(bundlePath)
 	if err != nil {
 		t.Fatalf("LoadBundle error: %v", err)
 	}
