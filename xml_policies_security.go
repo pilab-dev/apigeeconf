@@ -148,7 +148,7 @@ func (p *XMLParser) parseAccessControlPolicy(decoder *xml.Decoder, policyName st
 		case xml.StartElement:
 			switch {
 			case strings.EqualFold(t.Name.Local, "IPRules"):
-				p.parseIPRules(decoder, policy)
+				p.parseIPRules(decoder, t, policy)
 			}
 		case xml.EndElement:
 			if strings.EqualFold(t.Name.Local, "AccessControl") {
@@ -159,8 +159,8 @@ func (p *XMLParser) parseAccessControlPolicy(decoder *xml.Decoder, policyName st
 	return jsPolicy, policy, nil
 }
 
-func (p *XMLParser) parseIPRules(decoder *xml.Decoder, policy *Policy) {
-	policy.AccessControlMatch = p.getAttributeValue(nil, "noRuleMatchAction") // Need to pass attrs if available
+func (p *XMLParser) parseIPRules(decoder *xml.Decoder, start xml.StartElement, policy *Policy) {
+	policy.AccessControlMatch = p.getAttributeValue(start.Attr, "noRuleMatchAction")
 	for {
 		tok, err := decoder.Token()
 		if err != nil {
