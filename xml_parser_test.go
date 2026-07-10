@@ -621,7 +621,6 @@ func readCharDataRawUnsafe(decoder *xml.Decoder) string {
 			return ""
 		}
 	}
-	return ""
 }
 
 func TestProxyEndpointParsing(t *testing.T) {
