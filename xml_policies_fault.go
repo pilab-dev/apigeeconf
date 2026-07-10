@@ -23,21 +23,21 @@ func (p *XMLParser) parseRaiseFaultPolicy(decoder *xml.Decoder, policyName strin
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "FaultResponse":
+			switch {
+			case strings.EqualFold(elem.Name.Local, "FaultResponse"):
 				p.parseFaultResponse(decoder, policy)
-			case "IgnoreUnresolvedVariables":
-				if txt, err := p.readCharData(decoder); err == nil {
-					policy.IgnoreUnresolvedVariables = strings.ToLower(txt) == "true"
-				}
-			case "AssignTo":
+			case strings.EqualFold(elem.Name.Local, "IgnoreUnresolvedVariables"):
+				policy.IgnoreUnresolvedVariables = p.readBool(decoder)
+			case strings.EqualFold(elem.Name.Local, "AssignTo"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.RaiseFaultAssignTo = txt
 					policy.AssignTo = txt // Compatibility
 				}
+			case strings.EqualFold(elem.Name.Local, "Properties"):
+				p.parseProperties(decoder, policy.Properties)
 			}
 		case xml.EndElement:
-			if elem.Name.Local == "RaiseFault" {
+			if strings.EqualFold(elem.Name.Local, "RaiseFault") {
 				return jsPolicy, policy, nil
 			}
 		}
@@ -58,18 +58,18 @@ func (p *XMLParser) parseFaultResponse(decoder *xml.Decoder, policy *Policy) {
 		}
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Set":
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Set"):
 				p.parseFaultResponseAction(decoder, "Set", policy.FaultResponse)
-			case "Add":
+			case strings.EqualFold(elem.Name.Local, "Add"):
 				p.parseFaultResponseAction(decoder, "Add", policy.FaultResponse)
-			case "Remove":
+			case strings.EqualFold(elem.Name.Local, "Remove"):
 				p.parseFaultResponseAction(decoder, "Remove", policy.FaultResponse)
-			case "Copy":
+			case strings.EqualFold(elem.Name.Local, "Copy"):
 				p.parseFaultResponseAction(decoder, "Copy", policy.FaultResponse)
 			}
 		case xml.EndElement:
-			if elem.Name.Local == "FaultResponse" {
+			if strings.EqualFold(elem.Name.Local, "FaultResponse") {
 				return
 			}
 		}
@@ -84,8 +84,8 @@ func (p *XMLParser) parseFaultResponseAction(decoder *xml.Decoder, action string
 		}
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "StatusCode":
+			switch {
+			case strings.EqualFold(elem.Name.Local, "StatusCode"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					if action == "Set" {
 						config.StatusCode = txt
@@ -93,7 +93,7 @@ func (p *XMLParser) parseFaultResponseAction(decoder *xml.Decoder, action string
 						config.CopyStatusCode = true
 					}
 				}
-			case "ReasonPhrase":
+			case strings.EqualFold(elem.Name.Local, "ReasonPhrase"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					if action == "Set" {
 						config.ReasonPhrase = txt
@@ -101,12 +101,12 @@ func (p *XMLParser) parseFaultResponseAction(decoder *xml.Decoder, action string
 						config.CopyReasonPhrase = true
 					}
 				}
-			case "Payload":
+			case strings.EqualFold(elem.Name.Local, "Payload"):
 				config.PayloadContentType = p.getAttributeValue(elem.Attr, "contentType")
-				if txt, err := p.readCharData(decoder); err == nil {
+				if txt := p.readCharDataNested(decoder, "Payload"); txt != "" {
 					config.Payload = txt
 				}
-			case "Header":
+			case strings.EqualFold(elem.Name.Local, "Header"):
 				name := p.getAttributeValue(elem.Attr, "name")
 				if txt, err := p.readCharData(decoder); err == nil {
 					if action == "Set" || action == "Add" {
@@ -119,7 +119,7 @@ func (p *XMLParser) parseFaultResponseAction(decoder *xml.Decoder, action string
 				}
 			}
 		case xml.EndElement:
-			if elem.Name.Local == action {
+			if strings.EqualFold(elem.Name.Local, action) {
 				return
 			}
 		}

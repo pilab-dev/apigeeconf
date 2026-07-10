@@ -12,6 +12,7 @@ func (p *XMLParser) parseJavaScriptPolicy(decoder *xml.Decoder, policyName strin
 		Name:       policyName,
 		Properties: make(map[string]string),
 		Includes:   []string{},
+		TimeLimit:  200, // Default
 	}
 
 	for {
@@ -22,57 +23,35 @@ func (p *XMLParser) parseJavaScriptPolicy(decoder *xml.Decoder, policyName strin
 
 		switch elem := token.(type) {
 		case xml.StartElement:
-			switch elem.Name.Local {
-			case "Javascript":
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "timeLimit" {
-						fmt.Sscanf(attr.Value, "%d", &policy.TimeLimit)
+			switch {
+			case strings.EqualFold(elem.Name.Local, "Javascript"):
+				if tl := p.getAttributeValue(elem.Attr, "timeLimit"); tl != "" {
+					var t int
+					fmt.Sscanf(tl, "%d", &t)
+					if t > 0 {
+						policy.TimeLimit = t
 					}
 				}
-			case "Properties":
-				// Continue
-			case "Property":
-				var propValue, propName string
-				for _, attr := range elem.Attr {
-					if attr.Name.Local == "name" {
-						propName = attr.Value
-					}
+			case strings.EqualFold(elem.Name.Local, "Properties"):
+				p.parseProperties(decoder, policy.Properties)
+			case strings.EqualFold(elem.Name.Local, "IncludeURL"):
+				if txt, err := p.readCharData(decoder); err == nil && txt != "" {
+					policy.Includes = append(policy.Includes, txt)
 				}
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						propValue = string(char)
-					}
+			case strings.EqualFold(elem.Name.Local, "ResourceURL"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.ScriptURL = txt
 				}
-				if propName != "" {
-					policy.Properties[propName] = strings.TrimSpace(propValue)
-				}
-			case "IncludeURL":
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						url := strings.TrimSpace(string(char))
-						if url != "" {
-							policy.Includes = append(policy.Includes, url)
-						}
-					}
-				}
-			case "ResourceURL":
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						policy.ScriptURL = strings.TrimSpace(string(char))
-					}
-				}
-			case "Source":
-				if tok, err := decoder.Token(); err == nil {
-					if char, ok := tok.(xml.CharData); ok {
-						policy.Source = string(char)
-					}
+			case strings.EqualFold(elem.Name.Local, "Source"):
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.Source = txt
 				}
 			}
+		case xml.EndElement:
+			if strings.EqualFold(elem.Name.Local, "Javascript") {
+				return policy, nil
+			}
 		}
-	}
-
-	if policy.TimeLimit == 0 {
-		policy.TimeLimit = 200
 	}
 
 	return policy, nil
