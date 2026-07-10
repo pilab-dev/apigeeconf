@@ -265,11 +265,12 @@ type yamlXMLToJSON struct {
 }
 
 type yamlExtractVar struct {
-	Name    string `yaml:"name"`
-	Type    string `yaml:"type,omitempty"`
-	Pattern string `yaml:"pattern,omitempty"`
-	Index   int    `yaml:"index,omitempty"`
-	Prefix  string `yaml:"prefix,omitempty"`
+	Name       string `yaml:"name"`
+	Type       string `yaml:"type,omitempty"`
+	Pattern    string `yaml:"pattern,omitempty"`
+	Index      int    `yaml:"index,omitempty"`
+	Prefix     string `yaml:"prefix,omitempty"`
+	IgnoreCase bool   `yaml:"ignore_case,omitempty"`
 }
 
 type yamlServiceCallout struct {
@@ -951,11 +952,12 @@ func (l *YAMLLoader) parsePolicy(name string, yp *yamlPolicy) (*JavaScriptPolicy
 			policy.VariablePrefix = yp.ExtractVariables.VariablePrefix
 			for _, ev := range yp.ExtractVariables.Variables {
 				policy.VariableConfigs = append(policy.VariableConfigs, VariableConfig{
-					Name:    ev.Name,
-					Type:    ev.Type,
-					Pattern: ev.Pattern,
-					Index:   ev.Index,
-					Prefix:  ev.Prefix,
+					Name:       ev.Name,
+					Type:       ev.Type,
+					Pattern:    ev.Pattern,
+					Index:      ev.Index,
+					Prefix:     ev.Prefix,
+					IgnoreCase: ev.IgnoreCase,
 				})
 			}
 		}
@@ -1483,11 +1485,12 @@ func convertPolicyToYAML(name string, policy *Policy) *yamlPolicy {
 		}
 		for _, vc := range policy.VariableConfigs {
 			yp.ExtractVariables.Variables = append(yp.ExtractVariables.Variables, yamlExtractVar{
-				Name:    vc.Name,
-				Type:    vc.Type,
-				Pattern: vc.Pattern,
-				Index:   vc.Index,
-				Prefix:  vc.Prefix,
+				Name:       vc.Name,
+				Type:       vc.Type,
+				Pattern:    vc.Pattern,
+				Index:      vc.Index,
+				Prefix:     vc.Prefix,
+				IgnoreCase: vc.IgnoreCase,
 			})
 		}
 

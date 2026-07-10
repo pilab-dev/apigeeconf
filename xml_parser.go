@@ -181,28 +181,6 @@ func (p *XMLParser) readCharData(decoder *xml.Decoder) (string, error) {
 	}
 }
 
-func (p *XMLParser) readCharDataPreserve(decoder *xml.Decoder) string {
-	depth := 0
-	var result strings.Builder
-	for {
-		tok, err := decoder.Token()
-		if err != nil {
-			return result.String()
-		}
-		switch v := tok.(type) {
-		case xml.CharData:
-			result.WriteString(string(v))
-		case xml.StartElement:
-			depth++
-		case xml.EndElement:
-			if depth == 0 {
-				return result.String()
-			}
-			depth--
-		}
-	}
-}
-
 func (p *XMLParser) readCharDataNested(decoder *xml.Decoder, parentName string) string {
 	depth := 1
 	var result strings.Builder
