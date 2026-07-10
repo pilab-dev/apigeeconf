@@ -162,13 +162,12 @@ func (p *XMLParser) parseLoadBalancer(decoder *xml.Decoder, start xml.StartEleme
 					Name: p.getAttributeValue(t.Attr, "name"),
 				}
 				if weight := p.getAttributeValue(t.Attr, "weight"); weight != "" {
-					fmt.Sscanf(weight, "%d", &server.Weight)
+					// Weight is optional; ignore parse errors for backward compatibility
+					_, _ = fmt.Sscanf(weight, "%d", &server.Weight)
 				}
 				target.LoadBalancer.Server = append(target.LoadBalancer.Server, server)
 			case strings.EqualFold(t.Name.Local, "MaxFailures"):
-				if txt, err := p.readCharData(decoder); err == nil {
-					fmt.Sscanf(txt, "%d", &target.LoadBalancer.MaxFailures)
-				}
+				target.LoadBalancer.MaxFailures = p.readInt(decoder)
 			case strings.EqualFold(t.Name.Local, "RetryEnabled"):
 				if txt, err := p.readCharData(decoder); err == nil {
 					target.LoadBalancer.RetryEnabled = strings.ToLower(txt) == "true"
