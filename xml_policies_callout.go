@@ -139,6 +139,16 @@ func (p *XMLParser) parseServiceCalloutHTTPConnection(decoder *xml.Decoder, poli
 				if txt, err := p.readCharData(decoder); err == nil {
 					policy.HTTPURL = txt
 				}
+			} else if strings.EqualFold(t.Name.Local, "Server") {
+				for _, attr := range t.Attr {
+					if strings.EqualFold(attr.Name.Local, "name") {
+						policy.TargetServer = attr.Value
+					}
+				}
+			} else if strings.EqualFold(t.Name.Local, "Path") {
+				if txt, err := p.readCharData(decoder); err == nil {
+					policy.TargetPath = txt
+				}
 			}
 		case xml.EndElement:
 			if strings.EqualFold(t.Name.Local, "HTTPTargetConnection") {

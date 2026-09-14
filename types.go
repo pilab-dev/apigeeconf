@@ -115,6 +115,8 @@ type Policy struct {
 	HTTPURL                string            // URL to call
 	HTTPHeaders            map[string]string // Headers
 	HTTPPayload            string            // Body
+	TargetServer           string            // Target server name if LoadBalancer is used
+	TargetPath             string            // Path if LoadBalancer is used
 
 	// For RaiseFault
 	FaultResponse      *FaultResponseConfig
